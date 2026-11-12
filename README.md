@@ -7,6 +7,10 @@ job (recipient + amount), approves it, and executes it — and the smart contrac
 guarantees the job can never be paid twice, even under retries, double-clicks,
 or concurrent calls.
 
+**Live demo: https://pay-once.vercel.app** — try demo mode instantly, or
+connect a NEAR testnet wallet (e.g. Meteor) to use the live contract deployed
+at `payonce-precious08.testnet`.
+
 ## Why
 
 Double payments are a quiet, expensive bug in any system that pays people:
