@@ -275,6 +275,8 @@ p {
   align-items: center;
   gap: var(--spacing-3);
   flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .toolbar__title {
@@ -287,6 +289,8 @@ p {
   display: flex;
   flex-wrap: nowrap;
   overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
   gap: var(--spacing-5);
   border-bottom: 1px solid var(--line);
   scrollbar-width: none;
