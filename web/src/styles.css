@@ -30,6 +30,69 @@
   --transition-fast: 120ms ease;
 }
 
+[data-theme='dark'] {
+  --bg: #0d120f;
+  --surface: #161d18;
+  --surface-hover: #1c251f;
+  --ink: #eef3ef;
+  --ink-muted: #a7b5ab;
+  --ink-faint: #718275;
+  --line: #27332b;
+  --line-strong: #37473d;
+  --accent: #1e9e57;
+  --accent-hover: #25b464;
+  --accent-soft: #14301f;
+  --accent-text: #6fd598;
+  --focus: #2fbd6a;
+  --danger: #e5534b;
+  --danger-soft: #3a1d1d;
+  --danger-text: #f19a9a;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+[data-theme='dark'] .status-badge--awaiting {
+  background: #3a2f14;
+  color: #e8b64c;
+}
+
+[data-theme='dark'] .status-badge--approved {
+  background: #16283f;
+  color: #7db3f8;
+}
+
+[data-theme='dark'] .status-badge--pending {
+  background: #2a2140;
+  color: #bda6f5;
+}
+
+[data-theme='dark'] .status-badge--paid {
+  background: #14301f;
+  color: #5fd68d;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.theme-toggle:hover {
+  background: var(--surface-hover);
+}
+
 * {
   box-sizing: border-box;
 }

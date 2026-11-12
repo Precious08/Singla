@@ -18,6 +18,18 @@ describe('App', () => {
     }
   });
 
+  it('starts in dark mode and the toggle switches to light mode', () => {
+    render(<App />);
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    // This suite keeps earlier renders mounted, so use the latest toggle.
+    const toggles = screen.getAllByRole('button', {
+      name: /switch to light mode/i,
+    });
+    fireEvent.click(toggles[toggles.length - 1]);
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
   it('opens the create job dialog when clicking Create job button', () => {
     render(<App />);
 

@@ -81,7 +81,25 @@ export default function App() {
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [trackInput, setTrackInput] = useState('');
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      const stored = window.localStorage.getItem('payonce:theme');
+      if (stored === 'light' || stored === 'dark') return stored;
+    } catch {
+      /* storage unavailable — fall through to the dark default */
+    }
+    return 'dark';
+  });
   const enteredLiveFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      window.localStorage.setItem('payonce:theme', theme);
+    } catch {
+      /* storage unavailable — the theme still applies for this visit */
+    }
+  }, [theme]);
 
   const isLive = accountId !== null;
 
@@ -384,6 +402,61 @@ export default function App() {
             <span className="brand__name">PayOnce</span>
           </div>
           <div className="header__actions">
+            <button
+              type="button"
+              className="theme-toggle"
+              onClick={() =>
+                setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+              }
+              aria-label={
+                theme === 'dark'
+                  ? 'Switch to light mode'
+                  : 'Switch to dark mode'
+              }
+              title={
+                theme === 'dark'
+                  ? 'Switch to light mode'
+                  : 'Switch to dark mode'
+              }
+            >
+              {theme === 'dark' ? (
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2" />
+                  <path d="M12 20v2" />
+                  <path d="m4.93 4.93 1.41 1.41" />
+                  <path d="m17.66 17.66 1.41 1.41" />
+                  <path d="M2 12h2" />
+                  <path d="M20 12h2" />
+                  <path d="m6.34 17.66-1.41 1.41" />
+                  <path d="m19.07 4.93-1.41 1.41" />
+                </svg>
+              ) : (
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+                </svg>
+              )}
+            </button>
             {isLive ? (
               <>
                 <span className="wallet-chip" title={accountId ?? undefined}>
