@@ -4,10 +4,14 @@ import App from './App';
 import { FIXTURE_JOBS } from './fixtures';
 
 describe('App', () => {
-  it('renders the demo warning, all fixture jobs, and the create job button', () => {
+  it('renders all fixture jobs, the connect wallet button, and the create job button', () => {
     render(<App />);
 
-    expect(screen.getByText('Demo — no real payments.')).toBeTruthy();
+    expect(screen.queryByText('Demo — no real payments.')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /reset demo data/i }),
+    ).toBeNull();
+    expect(screen.getByRole('button', { name: /connect wallet/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /create job/i })).toBeTruthy();
     for (const job of FIXTURE_JOBS) {
       expect(screen.getAllByText(job.job_id).length).toBeGreaterThan(0);

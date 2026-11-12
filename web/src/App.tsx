@@ -345,15 +345,6 @@ export default function App() {
     }
   }
 
-  function handleReset() {
-    setJobs(createFixtureJobs());
-    setFilter('All');
-    setSelectedId(FIXTURE_JOBS[0]?.job_id ?? null);
-    setNotice(
-      `Demo data reset to ${FIXTURE_JOBS.length} sample jobs. No transaction was sent.`,
-    );
-  }
-
   function openCreateDialog() {
     setIsDialogOpen(true);
   }
@@ -407,27 +398,33 @@ export default function App() {
                 </button>
               </>
             ) : (
-              <>
-                <button
-                  type="button"
-                  className="button button--secondary"
-                  onClick={handleConnect}
+              <button
+                type="button"
+                className="button button--primary button--connect"
+                onClick={handleConnect}
+              >
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
                 >
-                  Connect wallet
-                </button>
-                <button
-                  type="button"
-                  className="button button--ghost"
-                  onClick={handleReset}
-                >
-                  Reset demo data
-                </button>
-              </>
+                  <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+                  <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+                  <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+                </svg>
+                Connect wallet
+              </button>
             )}
           </div>
         </header>
 
-        {isLive ? (
+        {isLive && (
           <div className="demo-notice demo-notice--live" role="note">
             <span className="demo-notice__tag">Live</span>
             <p>
@@ -437,15 +434,6 @@ export default function App() {
               testnet transactions.
               {notOwner &&
                 ' This account is not the contract owner, so the contract will reject create, approve, and execute calls.'}
-            </p>
-          </div>
-        ) : (
-          <div className="demo-notice" role="note">
-            <span className="demo-notice__tag">Demo</span>
-            <p>
-              <strong>Demo — no real payments.</strong> Jobs and approvals live
-              only in this browser tab. Refreshing resets everything. Connect a
-              wallet to use the live testnet contract.
             </p>
           </div>
         )}
