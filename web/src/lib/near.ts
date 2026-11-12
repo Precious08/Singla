@@ -177,7 +177,10 @@ export async function openWalletModal(
   selector: WalletSelector,
 ): Promise<void> {
   const { setupModal } = await import('@near-wallet-selector/modal-ui');
-  const modal = setupModal(selector, { contractId: CONTRACT_ID });
+  // Deliberately no contractId: connecting must not grant the wallet a
+  // silent-signing function-call key. Every transaction then asks the
+  // owner to confirm it in the wallet.
+  const modal = setupModal(selector, {});
   modal.show();
 }
 
