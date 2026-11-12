@@ -1,6 +1,9 @@
 import type { WalletSelector } from '@near-wallet-selector/core';
 import { JOB_STATES, type DemoJob, type Job, type JobState } from '../types';
 
+// Node globals (Buffer, process, global) for the wallet SDK's dependency
+// chain are provided by vite-plugin-node-polyfills — see vite.config.ts.
+
 export const CONTRACT_ID = 'payonce-precious08.testnet';
 export const RPC_URL = 'https://rpc.testnet.near.org';
 
@@ -147,21 +150,22 @@ export async function fetchTrackedJobs(ids: string[]): Promise<DemoJob[]> {
 
 let selectorPromise: Promise<WalletSelector | null> | null = null;
 
-/** Lazily set up the wallet selector (testnet, MyNearWallet). Null if unavailable. */
+/** Lazily set up the wallet selector (testnet, Meteor Wallet). Null if unavailable. */
 export function initWalletSelector(): Promise<WalletSelector | null> {
   if (!selectorPromise) {
     selectorPromise = (async () => {
       try {
-        const [{ setupWalletSelector }, { setupMyNearWallet }] =
+        const [{ setupWalletSelector }, { setupMeteorWallet }] =
           await Promise.all([
             import('@near-wallet-selector/core'),
-            import('@near-wallet-selector/my-near-wallet'),
+            import('@near-wallet-selector/meteor-wallet'),
           ]);
         return await setupWalletSelector({
           network: 'testnet',
-          modules: [setupMyNearWallet()],
+          modules: [setupMeteorWallet()],
         });
-      } catch {
+      } catch (error) {
+        console.warn('Wallet selector failed to start', error);
         return null;
       }
     })();
