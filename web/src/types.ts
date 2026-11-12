@@ -15,7 +15,7 @@ export interface Job {
   state: JobState;
 }
 
-export type JobSource = 'fixture' | 'local';
+export type JobSource = 'fixture' | 'local' | 'chain';
 
 export interface DemoJob extends Job {
   source: JobSource;

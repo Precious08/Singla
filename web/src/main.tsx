@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import '@near-wallet-selector/modal-ui/styles.css';
 import './styles.css';
 
 const rootElement = document.getElementById('root');

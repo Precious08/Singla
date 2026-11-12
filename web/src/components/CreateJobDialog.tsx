@@ -16,6 +16,7 @@ interface CreateJobDialogProps {
     recipient: string;
     amount: string;
   }) => void;
+  live?: boolean;
 }
 
 const EMPTY_VALUES: CreateJobValues = {
@@ -31,6 +32,7 @@ export function CreateJobDialog({
   onClose,
   existingIds,
   onCreate,
+  live = false,
 }: CreateJobDialogProps) {
   const [values, setValues] = useState<CreateJobValues>(EMPTY_VALUES);
   const [errors, setErrors] = useState<CreateJobErrors>({});
@@ -120,7 +122,7 @@ export function CreateJobDialog({
   );
 
   return (
-    <Dialog isOpen={isOpen} onClose={onClose} title="Create a demo job" footer={footer}>
+    <Dialog isOpen={isOpen} onClose={onClose} title={live ? 'Create a job' : 'Create a demo job'} footer={footer}>
       <form ref={formRef} id="create-job-form" className="dialog__form" onSubmit={handleSubmit} noValidate>
         {hasErrors && (
           <p className="field-error" role="alert">
@@ -143,6 +145,7 @@ export function CreateJobDialog({
             value={values.jobId}
             onChange={(event) => updateField('jobId', event.target.value)}
             onBlur={() => handleBlur('jobId')}
+            placeholder="website-redesign-01"
             aria-invalid={Boolean(errors.jobId)}
             aria-describedby={
               errors.jobId ? 'job-id-hint job-id-error' : 'job-id-hint'
@@ -237,7 +240,9 @@ export function CreateJobDialog({
         </div>
 
         <p className="field-hint" style={{ textAlign: 'center', marginTop: 'var(--spacing-3)' }}>
-          This only updates local page state. No transaction is sent and no wallet is connected.
+          {live
+            ? 'This sends a real testnet transaction. Your wallet will ask you to approve it.'
+            : 'This only updates local page state. No transaction is sent and no wallet is connected.'}
         </p>
       </form>
     </Dialog>

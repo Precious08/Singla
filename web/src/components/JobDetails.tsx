@@ -6,6 +6,7 @@ import { StatusBadge } from './StatusBadge';
 interface JobDetailsProps {
   job: DemoJob;
   onApprove: (jobId: string) => void;
+  onExecute?: (jobId: string) => void;
   onClose?: () => void;
   isMobile?: boolean;
 }
@@ -19,6 +20,17 @@ const STATE_NOTES: Record<JobState, string> = {
     'This job is marked payment pending. No transfer was started in this demo.',
   Paid:
     'This job is marked paid. No on-chain payment occurred in this demo.',
+};
+
+const LIVE_STATE_NOTES: Record<JobState, string> = {
+  AwaitingApproval:
+    'This job is live on the contract and awaiting approval. Approving sends a real testnet transaction.',
+  Approved:
+    'This job is approved on the contract. Executing sends the payment from the contract to the recipient.',
+  PaymentPending:
+    'A payment for this job is in flight on-chain. It settles within seconds — refresh to see the outcome.',
+  Paid:
+    'This job is paid. The transfer is final on NEAR testnet and cannot be repeated.',
 };
 
 function blockedApprovalLabel(state: JobState): string {
@@ -37,7 +49,7 @@ function blockedApprovalLabel(state: JobState): string {
 function approvalHint(state: JobState): string {
   switch (state) {
     case 'Approved':
-      return 'Approved jobs are not approved again in this demo.';
+      return 'Approved jobs cannot be approved again.';
     case 'PaymentPending':
       return 'A payment is already pending, so approval is blocked.';
     case 'Paid':
@@ -47,8 +59,10 @@ function approvalHint(state: JobState): string {
   }
 }
 
-export function JobDetails({ job, onApprove, onClose, isMobile = false }: JobDetailsProps) {
+export function JobDetails({ job, onApprove, onExecute, onClose, isMobile = false }: JobDetailsProps) {
   const canApprove = job.state === 'AwaitingApproval';
+  const isLive = job.source === 'chain';
+  const canExecute = isLive && job.state === 'Approved' && Boolean(onExecute);
   const [showYocto, setShowYocto] = useState(false);
 
   return (
@@ -151,12 +165,16 @@ export function JobDetails({ job, onApprove, onClose, isMobile = false }: JobDet
             <dd className="details-panel__value">
               {job.source === 'fixture'
                 ? 'Sample fixture — not live contract state'
-                : 'Created locally in this session'}
+                : job.source === 'chain'
+                  ? 'Live contract record — read from NEAR testnet'
+                  : 'Created locally in this session'}
             </dd>
           </div>
         </div>
 
-        <p className="details-panel__state-note">{STATE_NOTES[job.state]}</p>
+        <p className="details-panel__state-note">
+          {isLive ? LIVE_STATE_NOTES[job.state] : STATE_NOTES[job.state]}
+        </p>
 
         <div className="details-panel__actions">
           <div className="details-panel__action-row">
@@ -179,14 +197,22 @@ export function JobDetails({ job, onApprove, onClose, isMobile = false }: JobDet
             <button
               type="button"
               className="button button--secondary details-panel__button"
-              disabled
+              disabled={!canExecute}
               aria-describedby="execute-note"
+              onClick={() => onExecute?.(job.job_id)}
             >
               Execute payment
             </button>
             <p id="execute-note" className="details-panel__disabled-hint">
-              Payment execution is unavailable in this demo. It requires the testnet
-              contract and wallet-signed transactions.
+              {isLive
+                ? job.state === 'Approved'
+                  ? 'Sends the payment from the contract to the recipient. Your wallet will ask you to approve the transaction.'
+                  : job.state === 'PaymentPending'
+                    ? 'A payment is already in flight for this job.'
+                    : job.state === 'Paid'
+                      ? 'This job is already paid — the contract will never pay it twice.'
+                      : 'Approve the job first, then execute its payment.'
+                : 'Payment execution is unavailable in this demo. It requires the testnet contract and wallet-signed transactions.'}
             </p>
           </div>
         </div>

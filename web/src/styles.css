@@ -1026,3 +1026,70 @@ p {
   border-top: 1px solid var(--line);
   background: var(--surface-hover);
 }
+/* Wallet / live mode */
+.header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.wallet-chip {
+  max-width: 220px;
+  padding: var(--spacing-1) var(--spacing-3);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.demo-notice--live {
+  border-color: var(--accent);
+}
+
+.demo-notice--live .demo-notice__tag {
+  background: var(--accent);
+}
+
+.toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.track-job {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  margin-top: var(--spacing-4);
+  padding: var(--spacing-3) var(--spacing-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.track-job__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.track-job__input {
+  flex: 1 1 200px;
+  min-height: 40px;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+
+.track-job__input::placeholder {
+  color: var(--ink-faint);
+}
