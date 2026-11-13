@@ -446,6 +446,19 @@ export function FrontDoor({
             </button>
             <button
               type="button"
+              className="choice__row"
+              onClick={() => {
+                setChoiceOpen(false);
+                onConnect();
+              }}
+            >
+              <span className="choice__row-title">Connect wallet</span>
+              <span className="choice__row-sub">
+                The real Singla, on NEAR testnet.
+              </span>
+            </button>
+            <button
+              type="button"
               className="choice__row choice__row--try"
               onClick={() => {
                 setChoiceOpen(false);
@@ -458,19 +471,6 @@ export function FrontDoor({
               </span>
               <span className="choice__row-sub">
                 Runs in your browser with pretend money.
-              </span>
-            </button>
-            <button
-              type="button"
-              className="choice__row"
-              onClick={() => {
-                setChoiceOpen(false);
-                onConnect();
-              }}
-            >
-              <span className="choice__row-title">Connect wallet</span>
-              <span className="choice__row-sub">
-                The real Singla, on NEAR testnet.
               </span>
             </button>
             <p className="choice__foot">You can switch any time.</p>

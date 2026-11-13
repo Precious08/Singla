@@ -27,7 +27,7 @@ describe('FrontDoor launch', () => {
     cleanup();
   });
 
-  it('a fresh Launch opens the choice, Try it first above Connect wallet', () => {
+  it('a fresh Launch opens the choice, Connect wallet above Try it first', () => {
     const door = renderDoor({});
 
     fireEvent.click(door.getByRole('button', { name: /launch app/i }));
@@ -37,9 +37,9 @@ describe('FrontDoor launch', () => {
       .getAllByRole('button')
       .filter((button) => (button.className ?? '').includes('choice__row'));
     expect(rows.length).toBe(2);
-    expect(rows[0].textContent).toContain('Try it first');
-    expect(rows[0].textContent).toContain('No wallet');
-    expect(rows[1].textContent).toContain('Connect wallet');
+    expect(rows[0].textContent).toContain('Connect wallet');
+    expect(rows[1].textContent).toContain('Try it first');
+    expect(rows[1].textContent).toContain('No wallet');
     expect(door.getByText(/you can switch any time/i)).toBeTruthy();
   });
 

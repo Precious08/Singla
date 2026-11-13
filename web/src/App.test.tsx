@@ -68,16 +68,16 @@ describe('App', () => {
     expect(app.getByText(/you can switch any time/i)).toBeTruthy();
   });
 
-  it('the choice offers Try it first before Connect wallet', () => {
+  it('the choice offers Connect wallet before Try it first', () => {
     const app = renderApp();
 
     fireEvent.click(app.getByRole('button', { name: /launch app/i }));
 
     const tryFirst = app.getByRole('button', { name: /try it first/i });
     const connect = app.getByRole('button', { name: /connect wallet/i });
-    // DOCUMENT_POSITION_FOLLOWING: Connect wallet comes after Try it first.
+    // DOCUMENT_POSITION_FOLLOWING: Try it first comes after Connect wallet.
     expect(
-      tryFirst.compareDocumentPosition(connect) &
+      connect.compareDocumentPosition(tryFirst) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
