@@ -13,7 +13,7 @@ import { JobCard } from './components/JobCard';
 import { JobDetails } from './components/JobDetails';
 import { JobTable } from './components/JobTable';
 import { ThemeToggle } from './components/ThemeToggle';
-import { Toast } from './components/Toast';
+import { Toast, type ToastTone } from './components/Toast';
 import {
   callContractMethod,
   CONTRACT_ID,
@@ -146,16 +146,20 @@ export default function App() {
   const [refusedOnce, setRefusedOnce] = useState(false);
   const [filter, setFilter] = useState<Filter>('All');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [notice, setNotice] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [chipMenuOpen, setChipMenuOpen] = useState(false);
 
   const [selector, setSelector] = useState<WalletSelector | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ key: number; message: string } | null>(
-    null,
-  );
+  // Every status message is a floating toast now, in demo mode and in
+  // live mode alike; nothing sits in the page as a banner.
+  const [toast, setToast] = useState<{
+    key: number;
+    message: string;
+    tone: ToastTone;
+  } | null>(null);
+  const toastSeq = useRef(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -278,8 +282,9 @@ export default function App() {
 
   const dismissToast = useCallback(() => setToast(null), []);
 
-  const showToast = useCallback((message: string) => {
-    setToast({ key: Date.now(), message });
+  const showToast = useCallback((message: string, tone: ToastTone = 'plain') => {
+    toastSeq.current += 1;
+    setToast({ key: toastSeq.current, message, tone });
   }, []);
 
   const refreshLiveJobs = useCallback(async () => {
@@ -317,11 +322,11 @@ export default function App() {
           : (chainJobs[0]?.job_id ?? null),
       );
     } catch {
-      setNotice('Could not refresh payments from the contract. Check your connection and try again.');
+      showToast('Could not refresh payments from the contract. Check your connection and try again.');
     } finally {
       setIsRefreshing(false);
     }
-  }, [accountId]);
+  }, [accountId, showToast]);
 
   // Set up the wallet selector once (skipped under tests).
   useEffect(() => {
@@ -387,7 +392,7 @@ export default function App() {
       void (async () => {
         const params = new URLSearchParams(window.location.search);
         if (params.has('transactionHashes')) {
-          setNotice('Transaction submitted. Showing the latest state from the chain.');
+          showToast('Transaction submitted. Showing the latest state from the chain.');
           window.history.replaceState({}, '', window.location.pathname);
         }
         await refreshLiveJobs();
@@ -413,18 +418,17 @@ export default function App() {
       setSelectedId(nextJobs[0]?.job_id ?? null);
       setIsDetailsOpen(false);
     }
-    setNotice('');
   }
 
   async function handleConnect() {
     if (!selector) {
-      setNotice('Wallet is still loading. Try again in a moment.');
+      showToast('Wallet is still loading. Try again in a moment.');
       return;
     }
     try {
       await openWalletModal(selector);
     } catch {
-      setNotice('The wallet window could not be opened.');
+      showToast('The wallet window could not be opened.');
     }
   }
 
@@ -458,7 +462,7 @@ export default function App() {
       const wallet = await selector.wallet();
       await wallet.signOut();
     } catch {
-      setNotice('Disconnecting the wallet failed. Try again.');
+      showToast('Disconnecting the wallet failed. Try again.');
     }
   }
 
@@ -491,12 +495,12 @@ export default function App() {
       setTryJobs((current) => [job, ...current]);
       setFilter('All');
       setSelectedId(job.job_id);
-      setNotice('');
+      showToast(`Payment "${input.jobId}" created.`);
       return;
     }
 
     if (input.recipient === CONTRACT_ID) {
-      setNotice('The recipient cannot be the contract account itself.');
+      showToast('The recipient cannot be the contract account itself.');
       return;
     }
 
@@ -517,10 +521,10 @@ export default function App() {
           },
           GAS.create,
         );
-        setNotice(`Payment "${input.jobId}" created on the contract.`);
+        showToast(`Payment "${input.jobId}" created.`);
         await refreshLiveJobs();
       } catch (error) {
-        setNotice(`Creating the payment failed: ${errorMessage(error)}`);
+        showToast(`Creating the payment failed: ${errorMessage(error)}`);
         await refreshLiveJobs();
       }
     })();
@@ -546,10 +550,10 @@ export default function App() {
     void (async () => {
       try {
         await callContractMethod(selector, 'approve_job', { job_id: jobId }, GAS.approve);
-        setNotice(`Payment "${jobId}" approved on the contract.`);
+        showToast(`Payment "${jobId}" approved on the contract.`);
         await refreshLiveJobs();
       } catch (error) {
-        setNotice(`Approving the payment failed: ${errorMessage(error)}`);
+        showToast(`Approving the payment failed: ${errorMessage(error)}`);
       }
     })();
   }
@@ -592,7 +596,7 @@ export default function App() {
           job?.amount ?? '0',
         );
         setFailedIds((current) => current.filter((id) => id !== jobId));
-        setNotice(
+        showToast(
           `Execution sent for "${jobId}". The payment settles in a few seconds. Refresh to see it paid.`,
         );
         await refreshLiveJobs();
@@ -602,7 +606,7 @@ export default function App() {
         setFailedIds((current) =>
           current.includes(jobId) ? current : [...current, jobId],
         );
-        setNotice(`Executing the payment failed: ${errorMessage(error)}`);
+        showToast(`Executing the payment failed: ${errorMessage(error)}`);
         await refreshLiveJobs();
       }
     })();
@@ -615,7 +619,6 @@ export default function App() {
     setRefusedOnce(false);
     setFilter('All');
     setSelectedId(null);
-    setNotice('');
   }
 
   function selectJob(jobId: string) {
@@ -641,6 +644,14 @@ export default function App() {
           onConnect={handleDoorConnect}
           onTry={() => setEntered('try')}
         />
+        {toast && (
+          <Toast
+            key={toast.key}
+            message={toast.message}
+            tone={toast.tone}
+            onDismiss={dismissToast}
+          />
+        )}
       </>
     );
   }
@@ -789,12 +800,6 @@ export default function App() {
         )}
 
         <main id="main">
-          {notice && (
-            <p className="notice" role="status">
-              {notice}
-            </p>
-          )}
-
           <div
             className="controlline rise-app"
             style={{ animationDelay: '120ms' }}
@@ -944,6 +949,7 @@ export default function App() {
         <Toast
           key={toast.key}
           message={toast.message}
+          tone={toast.tone}
           onDismiss={dismissToast}
         />
       )}

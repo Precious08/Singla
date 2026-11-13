@@ -1185,6 +1185,67 @@ dd {
   color: var(--ink-faint);
 }
 
+/* Recipient field: the sender types only the account name; the ".testnet"
+   ending rides inside the box, right after the typed text, in faint ink.
+   The wrapper carries the input's frame so the pair reads as one field. */
+.recipient-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.875rem;
+  transition: border-color var(--transition-fast);
+}
+
+.recipient-field:hover {
+  border-color: var(--line);
+}
+
+.recipient-field:focus-within {
+  border-color: var(--accent);
+}
+
+.recipient-field.is-invalid {
+  border-color: var(--danger);
+}
+
+.recipient-field__input {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
+.recipient-field__input::placeholder {
+  color: var(--ink-faint);
+}
+
+.recipient-field__suffix {
+  color: var(--ink-faint);
+  white-space: nowrap;
+  flex: none;
+}
+
+/* Invisible twin of the input's text, used to size the input to its
+   content so the suffix sits immediately after the last typed character. */
+.recipient-field__measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  white-space: pre;
+  font-size: 0.875rem;
+  pointer-events: none;
+}
+
 .field-error {
   display: flex;
   align-items: center;
@@ -1615,11 +1676,11 @@ dd {
   color: var(--danger-text);
 }
 
-/* Floating notification (copy-address confirmation). Rendered at the app
-   root, so its fixed positioning anchors to the viewport's top-right corner
-   and no page container can trap it. It wears the site's own surface and
-   line colours, so it follows the theme in both modes. It never shifts
-   layout. Only shown in live (connected) mode, where Copy address exists. */
+/* Floating notification. Rendered at the app root, so its fixed positioning
+   anchors to the viewport's top-right corner and no page container can trap
+   it. It wears the site's own surface and line colours, so it follows the
+   theme in both modes. It never shifts layout. Every status message uses
+   it, in demo mode and in live (connected) mode alike. */
 .toast {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 16px);
@@ -1644,6 +1705,18 @@ dd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.toast__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #92400e;
+  flex: none;
+}
+
+[data-theme='dark'] .toast__dot {
+  background: #e8b64c;
 }
 
 .toast__close {

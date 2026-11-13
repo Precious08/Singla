@@ -3,11 +3,16 @@ import { parseNearToYocto } from './amount';
 export const MAX_JOB_ID_BYTES = 64;
 export const DEMO_CONTRACT_ACCOUNT = 'payonce-demo.testnet';
 
+/** The ending every recipient account carries. The create form shows it
+ * inside the field; the sender types only the name before it. */
+export const RECIPIENT_SUFFIX = '.testnet';
+
 const ACCOUNT_ID_PATTERN =
   /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 
 export interface CreateJobValues {
   jobId: string;
+  /** The recipient's account name only, without the ".testnet" ending. */
   recipient: string;
   amountNear: string;
 }
@@ -43,6 +48,26 @@ export function validateJobId(
   return undefined;
 }
 
+/**
+ * Arrange whatever lands in the recipient field into the bare account
+ * name: trimmed, lowercased, and with the ".testnet" ending removed, so
+ * pasting a full address can never double the ending. Sub-domains the
+ * sender typed (e.g. "sofia.kitchen") stay exactly as typed.
+ */
+export function normalizeRecipientName(raw: string): string {
+  let name = raw.trim().toLowerCase();
+  while (name.endsWith(RECIPIENT_SUFFIX)) {
+    name = name.slice(0, -RECIPIENT_SUFFIX.length);
+  }
+  return name;
+}
+
+/** The full account ID a typed name stands for. A blank name stays blank,
+ * so validation still reports it as missing rather than as ".testnet". */
+export function assembleRecipientId(name: string): string {
+  return name.length === 0 ? '' : `${name}${RECIPIENT_SUFFIX}`;
+}
+
 export function validateRecipient(recipient: string): string | undefined {
   if (recipient.length === 0) {
     return 'Enter a recipient account.';
@@ -71,7 +96,9 @@ export function validateCreateJob(
     errors.jobId = jobIdError;
   }
 
-  const recipientError = validateRecipient(values.recipient);
+  const recipientError = validateRecipient(
+    assembleRecipientId(values.recipient),
+  );
   if (recipientError) {
     errors.recipient = recipientError;
   }

@@ -94,6 +94,16 @@ describe('App', () => {
     expect(app.getByRole('button', { name: /approve payment/i })).toBeTruthy();
   });
 
+  it('floats the created message as a toast, not a page banner', () => {
+    const app = renderApp();
+    enterTryMode(app);
+    createPayment(app, 'invoice-118', 'sofia.kitchen.testnet', '12.5');
+
+    expect(app.getByText('Payment "invoice-118" created.')).toBeTruthy();
+    // The old in-page banner is gone: no .notice element exists anywhere.
+    expect(document.body.querySelector('.notice')).toBeNull();
+  });
+
   it('runs the full try loop: approve, execute, paid, second try refused', async () => {
     vi.useFakeTimers();
     try {

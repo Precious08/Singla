@@ -3,9 +3,13 @@ import { useEffect } from 'react';
 /** How long a toast stays on screen before it dismisses itself. */
 export const TOAST_DURATION_MS = 3500;
 
+export type ToastTone = 'plain' | 'warning';
+
 interface ToastProps {
   message: string;
   onDismiss: () => void;
+  /** 'warning' leads the message with a small amber dot. Defaults to plain. */
+  tone?: ToastTone;
 }
 
 /**
@@ -16,7 +20,7 @@ interface ToastProps {
  * Tapping the notification or its small close button dismisses it, and
  * it dismisses itself after a few seconds either way.
  */
-export function Toast({ message, onDismiss }: ToastProps) {
+export function Toast({ message, onDismiss, tone = 'plain' }: ToastProps) {
   useEffect(() => {
     const timer = setTimeout(onDismiss, TOAST_DURATION_MS);
     return () => clearTimeout(timer);
@@ -24,6 +28,9 @@ export function Toast({ message, onDismiss }: ToastProps) {
 
   return (
     <div className="toast" role="status" onClick={onDismiss}>
+      {tone === 'warning' && (
+        <span className="toast__dot" aria-hidden="true" />
+      )}
       <span className="toast__message">{message}</span>
       <button
         type="button"
