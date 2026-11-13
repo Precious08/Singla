@@ -53,7 +53,7 @@ function jobsForFilter(jobs: DemoJob[], filter: Filter): DemoJob[] {
   return jobs.filter((job) => displayState(job) === filter);
 }
 
-const MOBILE_QUERY = '(max-width: 767px)';
+const MOBILE_QUERY = '(max-width: 1023px)';
 
 function useIsMobile(): boolean {
   const [isMobile, setIsMobile] = useState<boolean>(() => {
@@ -62,7 +62,7 @@ function useIsMobile(): boolean {
     }
     return typeof window.matchMedia === 'function'
       ? window.matchMedia(MOBILE_QUERY).matches
-      : window.innerWidth < 768;
+      : window.innerWidth < 1024;
   });
 
   useEffect(() => {
@@ -73,7 +73,7 @@ function useIsMobile(): boolean {
       query.addEventListener('change', onChange);
       return () => query.removeEventListener('change', onChange);
     }
-    const onResize = () => setIsMobile(window.innerWidth < 768);
+    const onResize = () => setIsMobile(window.innerWidth < 1024);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
@@ -609,7 +609,7 @@ export default function App() {
       </div>
 
       <div className="page">
-        <header className="header">
+        <header className="header rise-app">
           <Brand />
           <div className="header__actions">
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
@@ -675,6 +675,10 @@ export default function App() {
                   </div>
                 )}
               </div>
+            ) : entered === 'try' ? (
+              <span className="demo-pill" role="status">
+                Demo mode
+              </span>
             ) : (
               <button
                 type="button"
@@ -688,7 +692,11 @@ export default function App() {
         </header>
 
         {!isLive && (
-          <div className="try-strip" role="note">
+          <div
+            className="try-strip rise-app"
+            role="note"
+            style={{ animationDelay: '60ms' }}
+          >
             <span>
               {tryLoopDone
                 ? 'That is the whole product. Connect a wallet and it is real.'
@@ -718,7 +726,10 @@ export default function App() {
             </p>
           )}
 
-          <div className="controlline">
+          <div
+            className="controlline rise-app"
+            style={{ animationDelay: '120ms' }}
+          >
             <div
               className="filters"
               role="group"
@@ -776,7 +787,10 @@ export default function App() {
             </div>
           </div>
 
-          <div className="content-grid">
+          <div
+            className="content-grid rise-app"
+            style={{ animationDelay: '180ms' }}
+          >
             <div className="content-grid__main">
               <div className="job-cards" role="list" aria-label="Payments">
                 {filteredJobs.map((job) => (

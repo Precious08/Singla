@@ -151,7 +151,9 @@ h1,
 h2,
 h3,
 h4,
-p {
+p,
+dt,
+dd {
   margin: 0;
 }
 
@@ -893,7 +895,7 @@ p {
   color: var(--ink-muted);
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .job-cards {
     display: none !important;
   }
@@ -907,6 +909,12 @@ p {
     grid-template-columns: minmax(0, 1fr) 360px;
     gap: var(--spacing-6);
     align-items: start;
+  }
+
+  /* With nothing to show, the empty state takes the whole row instead
+     of sitting in the list column beside a blank panel column. */
+  .content-grid:has(.empty-state):not(:has(> .details-panel)) {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .details-panel {
@@ -936,7 +944,7 @@ p {
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .table-container {
     display: none;
   }
@@ -999,6 +1007,23 @@ p {
   }
 }
 
+/* Tablets (768–1023): payment cards get two columns instead of one
+   stretched column, and the details open as a sheet over the right
+   side rather than a squeezed desktop panel or a full-screen page. */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .job-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+
+  .details-panel {
+    left: auto;
+    width: min(440px, 100%);
+    border-left: 1px solid var(--line);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1032,6 +1057,7 @@ p {
   width: 100%;
   max-width: 480px;
   max-height: calc(100vh - var(--spacing-4) * 2);
+  max-height: calc(100dvh - var(--spacing-4) * 2);
   overflow: hidden;
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -1374,6 +1400,33 @@ p {
 }
 
 .chip svg {
+  flex: none;
+}
+
+/* Demo mode carries a label, not a button: it goes nowhere on purpose. */
+.demo-pill {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  flex: none;
+}
+
+.demo-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
   flex: none;
 }
 
@@ -1808,6 +1861,13 @@ p {
   animation: door-rise 250ms ease-out forwards;
 }
 
+/* The payments page rises in the same way when it opens: header first,
+   then the strip, the controls, and the payments themselves. */
+.rise-app {
+  opacity: 0;
+  animation: door-rise 250ms ease-out forwards;
+}
+
 .door-eyebrow {
   margin-bottom: 22px;
   font-size: 11px;
@@ -1831,6 +1891,27 @@ p {
   color: var(--door-accent-bright);
 }
 
+/* The slips take turns on one stage. A card holds for 7 seconds, then
+   the whole card swipes out and the next one slides in with its own
+   details; forward swipes out to the right and enters from the left,
+   going back mirrors it. The stage clips the swipe, and its padding
+   leaves room for the slip's offset shadow. The card is also
+   swappable: drag it with a finger or a mouse and it follows the
+   hand, the next card sliding in behind it. */
+.door-stage {
+  display: grid;
+  overflow: hidden;
+  padding: 0 14px 16px 0;
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.door-stage > .door-slip {
+  grid-area: 1 / 1;
+}
+
 /* The slip keeps its dark body in both themes. */
 .door-slip {
   position: relative;
@@ -1840,7 +1921,62 @@ p {
   background: linear-gradient(180deg, #1a231b, #151d16);
   color: #f2f5ef;
   box-shadow: 14px 16px 0 #0d3d22;
+  opacity: 1;
+  will-change: transform, opacity;
 }
+
+.door-slip--enter-next { animation: door-enter-next 0.9s ease-in-out both; }
+.door-slip--exit-next { animation: door-exit-next 0.9s ease-in-out both; z-index: 3; }
+.door-slip--enter-prev { animation: door-enter-prev 0.9s ease-in-out both; }
+.door-slip--exit-prev { animation: door-exit-prev 0.9s ease-in-out both; z-index: 3; }
+
+@keyframes door-enter-next {
+  from { opacity: 0; transform: translateX(-106%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes door-exit-next {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(106%); }
+}
+
+@keyframes door-enter-prev {
+  from { opacity: 0; transform: translateX(106%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes door-exit-prev {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-106%); }
+}
+
+/* A card on its way out shows its finished story: paid, and refused. */
+.door-slip--settled :is(.door-dot, .door-stamp, .door-retry),
+.door-slip--settled .door-bar i {
+  animation: none;
+}
+
+.door-slip--settled .door-dot {
+  border-color: #1e9e57;
+  background: #1e9e57;
+  color: #04160a;
+}
+
+.door-slip--settled .door-bar i {
+  transform: scaleX(1);
+}
+
+.door-slip--settled .door-stamp {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.door-slip--settled .door-retry {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+
 
 [data-theme='dark'] .door-slip {
   box-shadow: 14px 16px 0 #05080a;
@@ -1857,38 +1993,9 @@ p {
   color: #8fa48c;
 }
 
-.door-swap {
-  position: relative;
+.door-slip__details {
   margin-top: 20px;
   min-height: 96px;
-}
-
-.door-variant {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-}
-
-.door-variant--1 { animation: door-var-a 21s ease-in-out infinite; }
-.door-variant--2 { animation: door-var-b 21s ease-in-out infinite; }
-.door-variant--3 { animation: door-var-c 21s ease-in-out infinite; }
-
-@keyframes door-var-a {
-  0%, 29% { opacity: 1; }
-  33.33%, 96% { opacity: 0; }
-  100% { opacity: 1; }
-}
-
-@keyframes door-var-b {
-  0%, 29% { opacity: 0; }
-  33.33%, 62% { opacity: 1; }
-  66.66%, 100% { opacity: 0; }
-}
-
-@keyframes door-var-c {
-  0%, 62% { opacity: 0; }
-  66.66%, 96% { opacity: 1; }
-  100% { opacity: 0; }
 }
 
 .door-slip__title {
@@ -1969,23 +2076,26 @@ p {
   color: #7e8c7c;
 }
 
-.door-dot--1 { animation: door-dot-1 21s ease-in-out infinite; }
-.door-dot--2 { animation: door-dot-2 21s ease-in-out infinite; }
-.door-dot--3 { animation: door-dot-3 21s ease-in-out infinite; }
+/* Each card runs its story once, inside its own 7 seconds on stage:
+   written, approved, paid, then the refused second try. The card is
+   remounted every time it takes the stage, so the story restarts. */
+.door-dot--1 { animation: door-dot-1 7s ease-in-out both; }
+.door-dot--2 { animation: door-dot-2 7s ease-in-out both; }
+.door-dot--3 { animation: door-dot-3 7s ease-in-out both; }
 
 @keyframes door-dot-1 {
-  0%, 33.33%, 66.67%, 100% { border-color: #263128; background: #151d16; color: #7e8c7c; }
-  2%, 32%, 35.33%, 65.33%, 68.67%, 98.67% { border-color: #1e9e57; background: #1e9e57; color: #04160a; }
+  0%, 5% { border-color: #263128; background: #151d16; color: #7e8c7c; }
+  9%, 100% { border-color: #1e9e57; background: #1e9e57; color: #04160a; }
 }
 
 @keyframes door-dot-2 {
-  0%, 33.33%, 66.67%, 100% { border-color: #263128; background: #151d16; color: #7e8c7c; }
-  10%, 32%, 43.33%, 65.33%, 76.67%, 98.67% { border-color: #1e9e57; background: #1e9e57; color: #04160a; }
+  0%, 29% { border-color: #263128; background: #151d16; color: #7e8c7c; }
+  34%, 100% { border-color: #1e9e57; background: #1e9e57; color: #04160a; }
 }
 
 @keyframes door-dot-3 {
-  0%, 33.33%, 66.67%, 100% { border-color: #263128; background: #151d16; color: #7e8c7c; }
-  17.33%, 32.33%, 50.67%, 65.67%, 84%, 99% { border-color: #1e9e57; background: #1e9e57; color: #04160a; }
+  0%, 51% { border-color: #263128; background: #151d16; color: #7e8c7c; }
+  56%, 100% { border-color: #1e9e57; background: #1e9e57; color: #04160a; }
 }
 
 .door-bar {
@@ -2006,17 +2116,17 @@ p {
   transform-origin: left;
 }
 
-.door-bar--1 i { animation: door-fill-1 21s ease-in-out infinite; }
-.door-bar--2 i { animation: door-fill-2 21s ease-in-out infinite; }
+.door-bar--1 i { animation: door-fill-1 7s ease-in-out both; }
+.door-bar--2 i { animation: door-fill-2 7s ease-in-out both; }
 
 @keyframes door-fill-1 {
-  0%, 2.67%, 33.33%, 36%, 66.67%, 69.33%, 100% { transform: scaleX(0); }
-  7.33%, 32.33%, 40.67%, 65.67%, 74%, 99% { transform: scaleX(1); }
+  0%, 7% { transform: scaleX(0); }
+  24%, 100% { transform: scaleX(1); }
 }
 
 @keyframes door-fill-2 {
-  0%, 10%, 33.33%, 43.33%, 66.67%, 76.67%, 100% { transform: scaleX(0); }
-  14.67%, 32.33%, 48%, 65.67%, 81.33%, 99% { transform: scaleX(1); }
+  0%, 31% { transform: scaleX(0); }
+  46%, 100% { transform: scaleX(1); }
 }
 
 .door-stamp {
@@ -2030,7 +2140,7 @@ p {
   background: rgba(30, 158, 87, 0.14);
   opacity: 0;
   transform: scale(0.96);
-  animation: door-stamp-in 21s ease-in-out infinite;
+  animation: door-stamp-in 7s ease-in-out both;
 }
 
 .door-stamp b {
@@ -2059,8 +2169,8 @@ p {
 }
 
 @keyframes door-stamp-in {
-  0%, 16.67%, 33.33%, 50%, 66.67%, 83.33%, 100% { opacity: 0; transform: scale(0.96); }
-  19.33%, 32.33%, 52.67%, 65.67%, 86%, 99% { opacity: 1; transform: scale(1); }
+  0%, 57% { opacity: 0; transform: scale(0.96); }
+  64%, 100% { opacity: 1; transform: scale(1); }
 }
 
 .door-retry {
@@ -2073,7 +2183,7 @@ p {
   border: 1px solid #263128;
   border-radius: 4px;
   opacity: 0;
-  animation: door-retry-in 21s ease-in-out infinite;
+  animation: door-retry-in 7s ease-in-out both;
 }
 
 .door-retry s {
@@ -2093,8 +2203,8 @@ p {
 }
 
 @keyframes door-retry-in {
-  0%, 14.67%, 33.33%, 48%, 66.67%, 81.33%, 100% { opacity: 0; transform: translateY(4px); }
-  16.67%, 33%, 50%, 66.33%, 83.33%, 99.67% { opacity: 1; transform: translateY(0); }
+  0%, 48% { opacity: 0; transform: translateY(4px); }
+  55%, 100% { opacity: 1; transform: translateY(0); }
 }
 
 .door-liner {
@@ -2162,6 +2272,9 @@ p {
 .choice {
   position: relative;
   width: min(430px, 100%);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
   padding: 26px 26px 20px;
   border: 1px solid var(--choice-line);
   border-radius: 14px;
@@ -2279,7 +2392,11 @@ p {
     box-shadow: 10px 12px 0 #05080a;
   }
 
-  .door-swap {
+  .door-stage {
+    padding: 0 10px 12px 0;
+  }
+
+  .door-slip__details {
     margin-top: 24px;
   }
 
@@ -2344,8 +2461,34 @@ p {
     transition: none !important;
   }
 
-  .door-variant--1 {
+  .door-slip {
     opacity: 1;
+  }
+
+  .rise-app {
+    opacity: 1;
+    animation: none;
+  }
+
+  /* No motion: the one card on stage shows its finished story. */
+  .door .door-dot {
+    border-color: #1e9e57;
+    background: #1e9e57;
+    color: #04160a;
+  }
+
+  .door .door-bar i {
+    transform: scaleX(1);
+  }
+
+  .door .door-stamp {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .door .door-retry {
+    opacity: 1;
+    transform: none;
   }
 
   .door .rise {

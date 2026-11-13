@@ -12,6 +12,29 @@ with pretend money, no wallet needed, or connect a NEAR testnet wallet
 (Meteor, MyNearWallet, HOT, Ledger, WalletConnect) to use the live contract
 deployed at `payonce-precious08.testnet`.
 
+## See it
+
+The front door. The payment slip swipes from one payment to the next, and
+every slip ends the same way: paid once, and a second try refused.
+
+![The Singla front door](docs/screenshots/front-door.png)
+
+![The payment slip swiping to the next payment](docs/screenshots/card-swipe.gif)
+
+Launch asks one question: your real wallet, or try it first with pretend
+money.
+
+![The launch choice: connect a wallet, or try it first](docs/screenshots/choice.png)
+
+In try mode you run the whole loop yourself. Write a payment, approve it,
+pay it, then try to pay it again and watch Singla refuse.
+
+![A payment paid in try mode, and the second attempt refused](docs/screenshots/demo-refused.png)
+
+The same door on a phone:
+
+![The front door on mobile](docs/screenshots/front-door-mobile.png)
+
 ## Why
 
 Double payments are a quiet, expensive bug in any system that pays people:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Brand } from './Brand';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -28,13 +28,60 @@ const SLIPS = [
     meta: 'Due 30 Nov · Monthly',
     amount: '8',
   },
+  {
+    title: 'School fees, first term',
+    to: 'brightpath.school.testnet',
+    meta: 'Tue 18 Nov · Invoice No. 204',
+    amount: '45',
+  },
+  {
+    title: 'Logo and brand work',
+    to: 'emma.designs.testnet',
+    meta: 'Wed 19 Nov · Invoice No. 31',
+    amount: '15',
+  },
+  {
+    title: 'Wedding hall deposit',
+    to: 'palmview.hall.testnet',
+    meta: 'Sat 22 Nov · Booking No. 12',
+    amount: '120',
+  },
+  {
+    title: 'Car service and parts',
+    to: 'otto.garage.testnet',
+    meta: 'Thu 20 Nov · Job No. 77',
+    amount: '18',
+  },
+  {
+    title: 'Freelance writing, twelve articles',
+    to: 'lena.writes.testnet',
+    meta: 'Mon 24 Nov · Invoice No. 56',
+    amount: '24',
+  },
+  {
+    title: 'New laptop for the studio',
+    to: 'techdepot.store.testnet',
+    meta: 'Tue 25 Nov · Order No. 19',
+    amount: '210',
+  },
+  {
+    title: 'Product photo shoot',
+    to: 'marco.shoots.testnet',
+    meta: 'Fri 28 Nov · Booking No. 05',
+    amount: '36',
+  },
 ] as const;
+
+const SLIDE_MS = 900;
+const HOLD_MS = 7000;
 
 /**
  * The front door: one strong page, the rotating payment slip, and a single
  * door in. Launch opens the choice (connect a wallet, or try it first).
- * The slip tells the whole story on a 21-second loop, 7 seconds a card:
- * written, approved, paid, and a second try refused.
+ * The slip changes by itself every 7 seconds, and it is swappable: drag
+ * it with a finger or a mouse to move back or forward yourself. Each
+ * card tells the whole story in its 7 seconds: written, approved, paid,
+ * and a second try refused.
  */
 export function FrontDoor({
   theme,
@@ -43,6 +90,174 @@ export function FrontDoor({
   onTry,
 }: FrontDoorProps) {
   const [choiceOpen, setChoiceOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const [visit, setVisit] = useState(0);
+  const [leaving, setLeaving] = useState<{
+    index: number;
+    dir: 'next' | 'prev';
+  } | null>(null);
+  const [drag, setDrag] = useState<{
+    dx: number;
+    dir: 'next' | 'prev';
+    phase: 'drag' | 'commit' | 'snap';
+  } | null>(null);
+  const dragStartX = useRef<number | null>(null);
+  const dragWidth = useRef(0);
+  const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const wrap = (index: number) =>
+    ((index % SLIPS.length) + SLIPS.length) % SLIPS.length;
+
+  const goTo = (index: number, dir: 'next' | 'prev') => {
+    setLeaving({ index: active, dir });
+    setActive(wrap(index));
+    setVisit((value) => value + 1);
+  };
+
+  // The card changes by itself every 7 seconds. The timer restarts
+  // whenever the card changes, and waits while a hand is on the card.
+  useEffect(() => {
+    if (drag) {
+      return;
+    }
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return;
+    }
+    const timer = setTimeout(
+      () => goTo(active + 1, 'next'),
+      HOLD_MS,
+    );
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, visit, drag]);
+
+  // The leaving card slides away, then leaves the stage.
+  useEffect(() => {
+    if (!leaving) {
+      return;
+    }
+    const timer = setTimeout(() => setLeaving(null), SLIDE_MS);
+    return () => clearTimeout(timer);
+  }, [leaving]);
+
+  useEffect(
+    () => () => {
+      if (dragTimer.current) {
+        clearTimeout(dragTimer.current);
+      }
+    },
+    [],
+  );
+
+  // The card is swappable: a finger or a mouse drags it, the next card
+  // follows the hand, and past a short pull the change completes.
+  const onDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (leaving || (event.pointerType === 'mouse' && event.button !== 0)) {
+      return;
+    }
+    dragStartX.current = event.clientX;
+    dragWidth.current = event.currentTarget.getBoundingClientRect().width;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onDragMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragStartX.current === null || (drag && drag.phase !== 'drag')) {
+      return;
+    }
+    const dx = event.clientX - dragStartX.current;
+    if (!drag && Math.abs(dx) < 6) {
+      return;
+    }
+    setDrag({ dx, dir: dx > 0 ? 'next' : 'prev', phase: 'drag' });
+  };
+
+  const onDragEnd = () => {
+    if (dragStartX.current === null) {
+      return;
+    }
+    dragStartX.current = null;
+    if (!drag) {
+      return;
+    }
+    if (Math.abs(drag.dx) > 70) {
+      const target = drag.dir === 'next' ? active + 1 : active - 1;
+      setDrag({ ...drag, phase: 'commit' });
+      dragTimer.current = setTimeout(() => {
+        setActive(wrap(target));
+        setVisit((value) => value + 1);
+        setDrag(null);
+      }, 380);
+    } else {
+      setDrag({ ...drag, dx: 0, phase: 'snap' });
+      dragTimer.current = setTimeout(() => setDrag(null), 320);
+    }
+  };
+
+  const renderSlip = (
+    slip: (typeof SLIPS)[number],
+    className: string,
+    settled: boolean,
+    slipKey: string,
+    style?: React.CSSProperties,
+  ) => (
+    <article
+      key={slipKey}
+      style={style}
+      className={`door-slip ${className}${settled ? ' door-slip--settled' : ''}`}
+      aria-label={`Payment slip: ${slip.title}`}
+      aria-hidden={settled || undefined}
+    >
+      <div className="door-slip__top">
+        <span>Singla · Payment slip</span>
+        <span>One payment only</span>
+      </div>
+      <div className="door-slip__details">
+        <p className="door-slip__title">{slip.title}</p>
+        <p className="door-slip__to">To: {slip.to}</p>
+        <div className="door-slip__meta">
+          <span className="door-slip__date">{slip.meta}</span>
+          <span className="door-slip__amount">
+            {slip.amount} <small>NEAR</small>
+          </span>
+        </div>
+      </div>
+      <div className="door-track">
+        <div className="door-step">
+          <div className="door-dot door-dot--1">1</div>
+          <span>Written</span>
+        </div>
+        <div className="door-bar door-bar--1">
+          <i />
+        </div>
+        <div className="door-step">
+          <div className="door-dot door-dot--2">2</div>
+          <span>Approved</span>
+        </div>
+        <div className="door-bar door-bar--2">
+          <i />
+        </div>
+        <div className="door-step">
+          <div className="door-dot door-dot--3">3</div>
+          <span>Paid</span>
+        </div>
+      </div>
+      <div className="door-stamp">
+        <span className="door-stamp__tick">✓</span>
+        <div>
+          <b>Paid. Once.</b>
+          <small>Settled, and closed for good.</small>
+        </div>
+      </div>
+      <div className="door-retry">
+        <s>Same payment, tried again</s>
+        <em>Refused</em>
+      </div>
+    </article>
+  );
 
   useEffect(() => {
     if (!choiceOpen) {
@@ -104,64 +319,69 @@ export function FrontDoor({
             </h1>
           </div>
 
-          <div className="door-stage rise" style={{ animationDelay: '240ms' }}>
-            <article
-              className="door-slip"
-              aria-label="A payment slip moving through Singla"
+          <div className="door-stage-wrap rise" style={{ animationDelay: '240ms' }}>
+            <div
+              className="door-stage"
+              onPointerDown={onDragStart}
+              onPointerMove={onDragMove}
+              onPointerUp={onDragEnd}
+              onPointerCancel={onDragEnd}
             >
-              <div className="door-slip__top">
-                <span>Singla · Payment slip</span>
-                <span>One payment only</span>
-              </div>
-              <div className="door-swap">
-                {SLIPS.map((slip, index) => (
-                  <div
-                    key={slip.title}
-                    className={`door-variant door-variant--${index + 1}`}
-                  >
-                    <p className="door-slip__title">{slip.title}</p>
-                    <p className="door-slip__to">To: {slip.to}</p>
-                    <div className="door-slip__meta">
-                      <span className="door-slip__date">{slip.meta}</span>
-                      <span className="door-slip__amount">
-                        {slip.amount} <small>NEAR</small>
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="door-track">
-                <div className="door-step">
-                  <div className="door-dot door-dot--1">1</div>
-                  <span>Written</span>
-                </div>
-                <div className="door-bar door-bar--1">
-                  <i />
-                </div>
-                <div className="door-step">
-                  <div className="door-dot door-dot--2">2</div>
-                  <span>Approved</span>
-                </div>
-                <div className="door-bar door-bar--2">
-                  <i />
-                </div>
-                <div className="door-step">
-                  <div className="door-dot door-dot--3">3</div>
-                  <span>Paid</span>
-                </div>
-              </div>
-              <div className="door-stamp">
-                <span className="door-stamp__tick">✓</span>
-                <div>
-                  <b>Paid. Once.</b>
-                  <small>Settled, and closed for good.</small>
-                </div>
-              </div>
-              <div className="door-retry">
-                <s>Same payment, tried again</s>
-                <em>Refused</em>
-              </div>
-            </article>
+              {drag ? (
+                <>
+                  {renderSlip(
+                    SLIPS[wrap(drag.dir === 'next' ? active + 1 : active - 1)],
+                    '',
+                    true,
+                    'drag-neighbour',
+                    {
+                      transform:
+                        drag.phase === 'commit'
+                          ? 'translateX(0)'
+                          : `translateX(calc(${drag.dx}px ${
+                              drag.dir === 'next' ? '-' : '+'
+                            } 106%))`,
+                      transition:
+                        drag.phase === 'drag'
+                          ? 'none'
+                          : 'transform 380ms ease-out',
+                      zIndex: 2,
+                    },
+                  )}
+                  {renderSlip(SLIPS[active], '', false, `active-${visit}`, {
+                    transform:
+                      drag.phase === 'commit'
+                        ? `translateX(${
+                            drag.dir === 'next'
+                              ? dragWidth.current + 40
+                              : -(dragWidth.current + 40)
+                          }px)`
+                        : `translateX(${drag.dx}px)`,
+                    transition:
+                      drag.phase === 'drag'
+                        ? 'none'
+                        : 'transform 380ms ease-out',
+                    zIndex: 3,
+                  })}
+                </>
+              ) : (
+                <>
+                  {leaving &&
+                    renderSlip(
+                      SLIPS[leaving.index],
+                      `door-slip--exit-${leaving.dir}`,
+                      true,
+                      `leaving-${visit}`,
+                    )}
+                  {renderSlip(
+                    SLIPS[active],
+                    leaving ? `door-slip--enter-${leaving.dir}` : '',
+                    false,
+                    `active-${visit}`,
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </section>
 
