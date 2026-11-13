@@ -227,6 +227,28 @@ dd {
   flex: none;
 }
 
+/* The payments-page header wraps the pair in this button: the logo is
+   the way home, in demo and live alike. Visually it is the plain brand;
+   only the cursor, a soft hover and the focus ring say it can be pressed. */
+.brand-button {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: opacity 160ms ease;
+}
+
+.brand-button:hover {
+  opacity: 0.82;
+}
+
+.brand-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .brand__icon {
   flex: none;
   display: block;

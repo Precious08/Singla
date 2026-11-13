@@ -385,6 +385,16 @@ export default function App() {
     }
   }
 
+  /** The header logo is the home button, in both modes: back to the front
+   * door. Nothing is reset — a connected wallet stays connected (the
+   * door's Connect choice walks straight back in), and the demo keeps
+   * its payments (Start over is the reset there). */
+  function goHome() {
+    setChipMenuOpen(false);
+    setIsDetailsOpen(false);
+    setEntered('none');
+  }
+
   /** The front door's Connect choice: straight in if a wallet is already
    * connected, otherwise the wallet window, entering when it connects. */
   function handleDoorConnect() {
@@ -610,7 +620,15 @@ export default function App() {
 
       <div className="page">
         <header className="header rise-app">
-          <Brand />
+          <button
+            type="button"
+            className="brand-button"
+            onClick={goHome}
+            aria-label="Singla — back to the front door"
+            title="Back to the front door"
+          >
+            <Brand />
+          </button>
           <div className="header__actions">
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
             {isLive ? (
