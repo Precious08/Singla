@@ -1,90 +1,149 @@
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, fireEvent, render, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import { FIXTURE_JOBS } from './fixtures';
+
+type Scope = ReturnType<typeof within>;
+
+// Every render stays mounted in this suite, so each test scopes its
+// queries to its own render's container.
+function renderApp(): Scope {
+  const { container } = render(<App />);
+  return within(container);
+}
+
+function enterTryMode(app: Scope) {
+  fireEvent.click(app.getByRole('button', { name: /launch app/i }));
+  fireEvent.click(app.getByRole('button', { name: /try it first/i }));
+}
+
+function createPayment(
+  app: Scope,
+  id: string,
+  recipient: string,
+  amount: string,
+) {
+  fireEvent.click(app.getByRole('button', { name: /new payment/i }));
+  fireEvent.change(app.getByLabelText(/payment id/i), {
+    target: { value: id },
+  });
+  fireEvent.change(app.getByLabelText(/recipient account/i), {
+    target: { value: recipient },
+  });
+  fireEvent.change(app.getByLabelText(/amount \(near\)/i), {
+    target: { value: amount },
+  });
+  fireEvent.click(app.getByRole('button', { name: /create payment/i }));
+}
 
 describe('App', () => {
-  it('renders all fixture jobs, the connect wallet button, and the create job button', () => {
-    render(<App />);
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
 
-    expect(screen.queryByText('Demo — no real payments.')).toBeNull();
-    expect(
-      screen.queryByRole('button', { name: /reset demo data/i }),
-    ).toBeNull();
-    expect(screen.getByRole('button', { name: /connect wallet/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /create job/i })).toBeTruthy();
-    for (const job of FIXTURE_JOBS) {
-      expect(screen.getAllByText(job.job_id).length).toBeGreaterThan(0);
-    }
+  it('opens on the front door with the Singla pair and one door in', () => {
+    const app = renderApp();
+
+    expect(app.getByText('singla')).toBeTruthy();
+    expect(app.getByText(/pay the right person/i)).toBeTruthy();
+    expect(app.getByRole('button', { name: /launch app/i })).toBeTruthy();
+    // The dashboard is not visible until the visitor goes in.
+    expect(app.queryByRole('button', { name: /new payment/i })).toBeNull();
   });
 
   it('starts in dark mode and the toggle switches to light mode', () => {
-    render(<App />);
+    const app = renderApp();
 
     expect(document.documentElement.dataset.theme).toBe('dark');
-    // This suite keeps earlier renders mounted, so use the latest toggle.
-    const toggles = screen.getAllByRole('button', {
-      name: /switch to light mode/i,
-    });
-    fireEvent.click(toggles[toggles.length - 1]);
+    fireEvent.click(app.getByRole('button', { name: /switch to light mode/i }));
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 
-  it('opens the create job dialog when clicking Create job button', () => {
-    render(<App />);
+  it('Launch app opens the choice between connecting and trying first', () => {
+    const app = renderApp();
 
-    // Click the first "Create job" button (toolbar button)
-    const createButtons = screen.getAllByRole('button', { name: /create job/i });
-    fireEvent.click(createButtons[0]);
+    fireEvent.click(app.getByRole('button', { name: /launch app/i }));
 
-    expect(screen.getByRole('dialog', { name: /create a demo job/i })).toBeTruthy();
-    expect(screen.getByLabelText(/job id/i)).toBeTruthy();
-    expect(screen.getByLabelText(/recipient account/i)).toBeTruthy();
-    expect(screen.getByLabelText(/amount \(near\)/i)).toBeTruthy();
+    expect(app.getByRole('button', { name: /connect wallet/i })).toBeTruthy();
+    expect(app.getByRole('button', { name: /try it first/i })).toBeTruthy();
+    expect(app.getByText(/you can switch any time/i)).toBeTruthy();
   });
 
-  it('closes the create job dialog on Escape', () => {
-    render(<App />);
+  it('try mode starts empty, with the strip and no track form', () => {
+    const app = renderApp();
+    enterTryMode(app);
 
-    const createButtons = screen.getAllByRole('button', { name: /create job/i });
-    fireEvent.click(createButtons[0]);
-    expect(screen.getByRole('dialog', { name: /create a demo job/i })).toBeTruthy();
+    expect(
+      app.getByText(/you are trying singla with pretend money/i),
+    ).toBeTruthy();
+    expect(app.getByText('No payments yet.')).toBeTruthy();
+    expect(
+      app.getByText(/when you create a payment, it will appear here/i),
+    ).toBeTruthy();
+    expect(app.queryByText(/track a job/i)).toBeNull();
+    expect(app.queryByText(/track a payment/i)).toBeNull();
+    expect(app.getByRole('button', { name: /new payment/i })).toBeTruthy();
+  });
+
+  it('creates a payment in try mode and shows its details awaiting approval', () => {
+    const app = renderApp();
+    enterTryMode(app);
+    createPayment(app, 'invoice-118', 'sofia.kitchen.testnet', '12.5');
+
+    expect(app.getAllByText('invoice-118').length).toBeGreaterThan(0);
+    expect(app.getByText('Payment details')).toBeTruthy();
+    expect(app.getByRole('button', { name: /approve payment/i })).toBeTruthy();
+  });
+
+  it('runs the full try loop: approve, execute, paid, second try refused', async () => {
+    vi.useFakeTimers();
+    try {
+      const app = renderApp();
+      enterTryMode(app);
+      createPayment(app, 'invoice-118', 'sofia.kitchen.testnet', '12.5');
+
+      fireEvent.click(app.getByRole('button', { name: /approve payment/i }));
+      // The approval step settles into a quiet pill; execute lights up.
+      expect(app.queryByRole('button', { name: /approve payment/i })).toBeNull();
+      fireEvent.click(app.getByRole('button', { name: /execute payment/i }));
+
+      await act(async () => {
+        vi.advanceTimersByTime(2100);
+      });
+
+      expect(app.getAllByText('Paid').length).toBeGreaterThan(0);
+      fireEvent.click(app.getByRole('button', { name: /pay it again/i }));
+      expect(app.getByText(/refused/i)).toBeTruthy();
+      expect(
+        app.getByText('Already paid. Singla never pays twice.'),
+      ).toBeTruthy();
+      // After the full loop the strip flips to its end state.
+      expect(app.getByText(/that is the whole product/i)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('start over clears the try payments back to the empty state', () => {
+    const app = renderApp();
+    enterTryMode(app);
+    createPayment(app, 'invoice-118', 'sofia.kitchen.testnet', '12.5');
+    expect(app.queryByText('No payments yet.')).toBeNull();
+
+    fireEvent.click(app.getByRole('button', { name: /start over/i }));
+
+    expect(app.getByText('No payments yet.')).toBeTruthy();
+    expect(app.queryByText('invoice-118')).toBeNull();
+  });
+
+  it('closes the new payment dialog on Escape', () => {
+    const app = renderApp();
+    enterTryMode(app);
+
+    fireEvent.click(app.getByRole('button', { name: /new payment/i }));
+    expect(app.getByRole('dialog', { name: /new payment/i })).toBeTruthy();
 
     fireEvent.keyDown(document, { key: 'Escape' });
 
-    expect(screen.queryByRole('dialog', { name: /create a demo job/i })).not.toBeTruthy();
-  });
-
-  it('filters jobs by status', () => {
-    render(<App />);
-
-    const awaitingJobs = FIXTURE_JOBS.filter(j => j.state === 'AwaitingApproval');
-    expect(awaitingJobs.length).toBeGreaterThan(0);
-
-    // Click the first "Awaiting approval" filter button
-    const filterButtons = screen.getAllByRole('button', { name: /awaiting approval/i });
-    fireEvent.click(filterButtons[0]);
-
-    for (const job of awaitingJobs) {
-      expect(screen.getAllByText(job.job_id).length).toBeGreaterThan(0);
-    }
-    // Other state jobs should not appear in the job list (table or cards)
-    // They may still appear in the details panel if one was selected before filtering
-    // So we just verify the filtered jobs are visible
-  });
-
-  it('shows job details when selecting a job', () => {
-    render(<App />);
-
-    const firstJob = FIXTURE_JOBS[0];
-    // Click the first occurrence of the job ID (job card)
-    const jobElements = screen.getAllByText(firstJob.job_id);
-    fireEvent.click(jobElements[0]);
-
-    // Verify recipient appears in the details panel (not the table/cards)
-    const recipientElements = screen.getAllByText(firstJob.recipient);
-    expect(recipientElements.length).toBeGreaterThan(0);
-    // Verify approve button is present
-    expect(screen.getAllByRole('button', { name: /approve job/i }).length).toBeGreaterThan(0);
+    expect(app.queryByRole('dialog', { name: /new payment/i })).toBeNull();
   });
 });

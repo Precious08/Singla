@@ -148,21 +148,49 @@ export async function fetchTrackedJobs(ids: string[]): Promise<DemoJob[]> {
   return results.filter((job): job is DemoJob => job !== null);
 }
 
+/** Public WalletConnect (Reown) project ID for Singla. Safe in the code. */
+export const WALLETCONNECT_PROJECT_ID = '6c369f5ab4c8ddc593ea6565b7196971';
+
 let selectorPromise: Promise<WalletSelector | null> | null = null;
 
-/** Lazily set up the wallet selector (testnet, Meteor Wallet). Null if unavailable. */
+/** Lazily set up the wallet selector (testnet, five wallets). Null if unavailable. */
 export function initWalletSelector(): Promise<WalletSelector | null> {
   if (!selectorPromise) {
     selectorPromise = (async () => {
       try {
-        const [{ setupWalletSelector }, { setupMeteorWallet }] =
-          await Promise.all([
-            import('@near-wallet-selector/core'),
-            import('@near-wallet-selector/meteor-wallet'),
-          ]);
+        const [
+          { setupWalletSelector },
+          { setupMeteorWallet },
+          { setupMyNearWallet },
+          { setupHotWallet },
+          { setupLedger },
+          { setupWalletConnect },
+        ] = await Promise.all([
+          import('@near-wallet-selector/core'),
+          import('@near-wallet-selector/meteor-wallet'),
+          import('@near-wallet-selector/my-near-wallet'),
+          import('@near-wallet-selector/hot-wallet'),
+          import('@near-wallet-selector/ledger'),
+          import('@near-wallet-selector/wallet-connect'),
+        ]);
         return await setupWalletSelector({
           network: 'testnet',
-          modules: [setupMeteorWallet()],
+          modules: [
+            setupMeteorWallet(),
+            setupMyNearWallet(),
+            setupHotWallet(),
+            setupLedger(),
+            setupWalletConnect({
+              projectId: WALLETCONNECT_PROJECT_ID,
+              metadata: {
+                name: 'Singla',
+                description:
+                  'Pay the right person, the right amount, exactly once.',
+                url: 'https://trysingla.vercel.app',
+                icons: ['https://trysingla.vercel.app/favicon.svg'],
+              },
+            }),
+          ],
         });
       } catch (error) {
         console.warn('Wallet selector failed to start', error);
@@ -179,8 +207,9 @@ export async function openWalletModal(
   const { setupModal } = await import('@near-wallet-selector/modal-ui');
   // Deliberately no contractId: connecting must not grant the wallet a
   // silent-signing function-call key. Every transaction then asks the
-  // owner to confirm it in the wallet.
-  const modal = setupModal(selector, {});
+  // owner to confirm it in the wallet. The window stays white in both
+  // app themes.
+  const modal = setupModal(selector, { theme: 'light' });
   modal.show();
 }
 

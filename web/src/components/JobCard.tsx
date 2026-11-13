@@ -25,7 +25,7 @@ export function JobCard({ job, selected, onSelect }: JobCardProps) {
       <div className="job-card__header">
         <span className="job-card__id">{job.job_id}</span>
         <span className="job-card__status">
-          <StatusBadge state={job.state} />
+          <StatusBadge state={job.failed ? 'Failed' : job.state} />
         </span>
       </div>
       <div className="job-card__meta">

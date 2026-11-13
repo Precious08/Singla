@@ -14,11 +14,11 @@ export function JobTable({ jobs, selectedId, onSelect }: JobTableProps) {
   }
 
   return (
-    <div className="table-container" role="region" aria-label="Jobs table" tabIndex={0}>
+    <div className="table-container" role="region" aria-label="Payments table" tabIndex={0}>
       <table className="job-table">
         <thead>
           <tr>
-            <th scope="col">Job ID</th>
+            <th scope="col">Payment ID</th>
             <th scope="col">Recipient</th>
             <th scope="col">Amount</th>
             <th scope="col">Status</th>
@@ -37,7 +37,7 @@ export function JobTable({ jobs, selectedId, onSelect }: JobTableProps) {
                   className="job-table__select"
                   onClick={() => onSelect(job.job_id)}
                   aria-pressed={job.job_id === selectedId}
-                  aria-label={`Select job ${job.job_id}`}
+                  aria-label={`Select payment ${job.job_id}`}
                 >
                   {job.job_id}
                 </button>
@@ -49,7 +49,7 @@ export function JobTable({ jobs, selectedId, onSelect }: JobTableProps) {
                 {formatNearAmount(job.amount)}
               </td>
               <td>
-                <StatusBadge state={job.state} />
+                <StatusBadge state={job.failed ? 'Failed' : job.state} />
               </td>
             </tr>
           ))}

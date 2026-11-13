@@ -32,13 +32,13 @@ export function validateJobId(
   existingIds: ReadonlySet<string>,
 ): string | undefined {
   if (jobId.trim().length === 0) {
-    return 'Job ID cannot be blank.';
+    return 'Payment ID cannot be blank.';
   }
   if (utf8ByteLength(jobId) > MAX_JOB_ID_BYTES) {
-    return 'Job ID cannot exceed 64 bytes.';
+    return 'Payment ID cannot exceed 64 bytes.';
   }
   if (existingIds.has(jobId)) {
-    return 'Job ID already exists.';
+    return 'Payment ID already exists.';
   }
   return undefined;
 }

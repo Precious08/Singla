@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Dialog } from './Dialog';
 import {
-  DEMO_CONTRACT_ACCOUNT,
   validateCreateJob,
   type CreateJobErrors,
   type CreateJobValues,
@@ -16,7 +15,7 @@ interface CreateJobDialogProps {
     recipient: string;
     amount: string;
   }) => void;
-  live?: boolean;
+  mode?: 'live' | 'try';
 }
 
 const EMPTY_VALUES: CreateJobValues = {
@@ -32,7 +31,7 @@ export function CreateJobDialog({
   onClose,
   existingIds,
   onCreate,
-  live = false,
+  mode = 'try',
 }: CreateJobDialogProps) {
   const [values, setValues] = useState<CreateJobValues>(EMPTY_VALUES);
   const [errors, setErrors] = useState<CreateJobErrors>({});
@@ -116,13 +115,13 @@ export function CreateJobDialog({
         Cancel
       </button>
       <button type="submit" form="create-job-form" className="button button--primary">
-        Create job
+        Create payment
       </button>
     </div>
   );
 
   return (
-    <Dialog isOpen={isOpen} onClose={onClose} title={live ? 'Create a job' : 'Create a demo job'} footer={footer}>
+    <Dialog isOpen={isOpen} onClose={onClose} title="New payment" footer={footer}>
       <form ref={formRef} id="create-job-form" className="dialog__form" onSubmit={handleSubmit} noValidate>
         {hasErrors && (
           <p className="field-error" role="alert">
@@ -136,7 +135,7 @@ export function CreateJobDialog({
         )}
 
         <div className="field">
-          <label htmlFor="job-id">Job ID</label>
+          <label htmlFor="job-id">Payment ID</label>
           <input
             ref={jobIdRef}
             id="job-id"
@@ -184,14 +183,13 @@ export function CreateJobDialog({
                 ? 'recipient-hint recipient-error'
                 : 'recipient-hint'
             }
-            placeholder="demo-designer.testnet"
+            placeholder="sofia.kitchen.testnet"
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
           />
           <p id="recipient-hint" className="field-hint">
-            A valid NEAR account ID. Cannot be the demo contract account (
-            <span className="mono">{DEMO_CONTRACT_ACCOUNT}</span>).
+            A valid NEAR account ID.
           </p>
           {errors.recipient && (
             <p id="recipient-error" className="field-error">
@@ -240,9 +238,9 @@ export function CreateJobDialog({
         </div>
 
         <p className="field-hint" style={{ textAlign: 'center', marginTop: 'var(--spacing-3)' }}>
-          {live
+          {mode === 'live'
             ? 'This sends a real testnet transaction. Your wallet will ask you to approve it.'
-            : 'This only updates local page state. No transaction is sent and no wallet is connected.'}
+            : 'This payment lives in your browser with pretend money. No transaction is sent.'}
         </p>
       </form>
     </Dialog>

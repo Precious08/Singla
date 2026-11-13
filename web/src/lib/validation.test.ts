@@ -16,22 +16,22 @@ describe('validateJobId', () => {
   });
 
   it('rejects blank IDs', () => {
-    expect(validateJobId('', noIds)).toBe('Job ID cannot be blank.');
-    expect(validateJobId('   ', noIds)).toBe('Job ID cannot be blank.');
+    expect(validateJobId('', noIds)).toBe('Payment ID cannot be blank.');
+    expect(validateJobId('   ', noIds)).toBe('Payment ID cannot be blank.');
   });
 
   it('counts bytes, not characters, for the 64-byte limit', () => {
     expect(validateJobId('a'.repeat(65), noIds)).toBe(
-      'Job ID cannot exceed 64 bytes.',
+      'Payment ID cannot exceed 64 bytes.',
     );
     expect(validateJobId('é'.repeat(33), noIds)).toBe(
-      'Job ID cannot exceed 64 bytes.',
+      'Payment ID cannot exceed 64 bytes.',
     );
   });
 
   it('rejects duplicate IDs', () => {
     expect(validateJobId('job-1', new Set(['job-1']))).toBe(
-      'Job ID already exists.',
+      'Payment ID already exists.',
     );
   });
 });
@@ -83,7 +83,7 @@ describe('validateCreateJob', () => {
     );
 
     expect(result.errors).toEqual({
-      jobId: 'Job ID cannot be blank.',
+      jobId: 'Payment ID cannot be blank.',
       recipient: 'Enter a recipient account.',
       amountNear: 'Enter an amount in NEAR.',
     });
@@ -114,7 +114,7 @@ describe('validateCreateJob', () => {
       new Set(['existing-job']),
     );
 
-    expect(result.errors.jobId).toBe('Job ID already exists.');
+    expect(result.errors.jobId).toBe('Payment ID already exists.');
     expect(result.errors.recipient).toBeUndefined();
     expect(result.errors.amountNear).toBeUndefined();
   });

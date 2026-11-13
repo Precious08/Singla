@@ -19,6 +19,13 @@ export type JobSource = 'fixture' | 'local' | 'chain';
 
 export interface DemoJob extends Job {
   source: JobSource;
+  /**
+   * Display-only flag: the last live send for this payment failed. The
+   * contract has no failed state (a failed send returns the job to
+   * Approved), so the app remembers the failure locally and shows the
+   * payment as Failed until it is sent again.
+   */
+  failed?: boolean;
 }
 
 export const JOB_STATE_LABELS: Record<JobState, string> = {

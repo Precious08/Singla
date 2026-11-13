@@ -1,14 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { WalletSelector } from '@near-wallet-selector/core';
+import { Brand } from './components/Brand';
 import { CreateJobDialog } from './components/CreateJobDialog';
+import { FrontDoor } from './components/FrontDoor';
 import { JobCard } from './components/JobCard';
 import { JobDetails } from './components/JobDetails';
 import { JobTable } from './components/JobTable';
-import { createFixtureJobs, FIXTURE_JOBS } from './fixtures';
+import { ThemeToggle } from './components/ThemeToggle';
 import {
   callContractMethod,
   CONTRACT_ID,
-  fetchContractJob,
   fetchContractOwner,
   fetchTrackedJobs,
   GAS,
@@ -19,16 +26,31 @@ import {
 } from './lib/near';
 import { JOB_STATES, JOB_STATE_LABELS, type DemoJob, type JobState } from './types';
 
-type Filter = 'All' | JobState;
+type Filter = 'All' | JobState | 'Failed';
 
-const FILTERS: readonly Filter[] = ['All', ...JOB_STATES];
+const FILTERS: readonly Filter[] = [
+  'All',
+  'AwaitingApproval',
+  'Approved',
+  'PaymentPending',
+  'Paid',
+  'Failed',
+];
 
 function filterLabel(filter: Filter): string {
-  return filter === 'All' ? 'All' : JOB_STATE_LABELS[filter];
+  if (filter === 'All') return 'All';
+  if (filter === 'Failed') return 'Failed';
+  return JOB_STATE_LABELS[filter];
+}
+
+/** What a payment looks like on screen: a failed send shows as Failed. */
+function displayState(job: DemoJob): Filter {
+  return job.failed ? 'Failed' : job.state;
 }
 
 function jobsForFilter(jobs: DemoJob[], filter: Filter): DemoJob[] {
-  return filter === 'All' ? jobs : jobs.filter((job) => job.state === filter);
+  if (filter === 'All') return jobs;
+  return jobs.filter((job) => displayState(job) === filter);
 }
 
 const MOBILE_QUERY = '(max-width: 767px)';
@@ -66,21 +88,72 @@ function errorMessage(error: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
-export default function App() {
-  const [jobs, setJobs] = useState<DemoJob[]>(createFixtureJobs);
-  const [filter, setFilter] = useState<Filter>('All');
-  const [selectedId, setSelectedId] = useState<string | null>(
-    FIXTURE_JOBS[0]?.job_id ?? null,
+const TRY_KEY = 'singla:try-payments';
+const FAILED_KEY = 'singla:failed-payments';
+
+function isStoredJob(value: unknown): value is DemoJob {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<DemoJob>;
+  return (
+    typeof candidate.job_id === 'string' &&
+    typeof candidate.recipient === 'string' &&
+    typeof candidate.amount === 'string' &&
+    typeof candidate.state === 'string' &&
+    (JOB_STATES as readonly string[]).includes(candidate.state)
   );
+}
+
+function loadTryJobs(): DemoJob[] {
+  try {
+    const raw = window.localStorage.getItem(TRY_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(isStoredJob).map((job) => ({ ...job, source: 'local' as const }));
+  } catch {
+    return [];
+  }
+}
+
+function loadFailedIds(): string[] {
+  try {
+    const raw = window.localStorage.getItem(FAILED_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((value): value is string => typeof value === 'string');
+  } catch {
+    return [];
+  }
+}
+
+export default function App() {
+  const [entered, setEntered] = useState<'none' | 'try' | 'live'>('none');
+  const [tryJobs, setTryJobs] = useState<DemoJob[]>(loadTryJobs);
+  const [liveJobs, setLiveJobs] = useState<DemoJob[]>([]);
+  const [failedIds, setFailedIds] = useState<string[]>(loadFailedIds);
+  const [refusedOnce, setRefusedOnce] = useState(false);
+  const [filter, setFilter] = useState<Filter>('All');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [chipMenuOpen, setChipMenuOpen] = useState(false);
 
   const [selector, setSelector] = useState<WalletSelector | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [trackInput, setTrackInput] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
       const stored = window.localStorage.getItem('payonce:theme');
@@ -91,6 +164,9 @@ export default function App() {
     return 'dark';
   });
   const enteredLiveFor = useRef<string | null>(null);
+  const enterOnConnect = useRef(false);
+  const chipRef = useRef<HTMLDivElement>(null);
+  const tryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -101,7 +177,68 @@ export default function App() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TRY_KEY, JSON.stringify(tryJobs));
+    } catch {
+      /* storage unavailable — try payments last for this visit only */
+    }
+  }, [tryJobs]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FAILED_KEY, JSON.stringify(failedIds));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [failedIds]);
+
+  useEffect(() => {
+    const timers = tryTimers.current;
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+    };
+  }, []);
+
+  // Close the account menu on an outside click or Escape.
+  useEffect(() => {
+    if (!chipMenuOpen) {
+      return;
+    }
+    const onPointer = (event: MouseEvent) => {
+      if (chipRef.current && !chipRef.current.contains(event.target as Node)) {
+        setChipMenuOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setChipMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [chipMenuOpen]);
+
   const isLive = accountId !== null;
+  const inApp = entered !== 'none';
+
+  /** Live payments carry their failed flag; try payments are their own list. */
+  const jobs = useMemo<DemoJob[]>(() => {
+    if (!inApp) {
+      return [];
+    }
+    if (isLive) {
+      return liveJobs.map((job) => ({
+        ...job,
+        failed: job.state === 'Approved' && failedIds.includes(job.job_id),
+      }));
+    }
+    return tryJobs;
+  }, [inApp, isLive, liveJobs, tryJobs, failedIds]);
 
   const existingIds = useMemo(
     () => new Set(jobs.map((job) => job.job_id)),
@@ -109,14 +246,16 @@ export default function App() {
   );
 
   const counts = useMemo(() => {
-    const next: Record<JobState, number> = {
+    const next: Record<Filter, number> = {
+      All: jobs.length,
       AwaitingApproval: 0,
       Approved: 0,
       PaymentPending: 0,
       Paid: 0,
+      Failed: 0,
     };
     for (const job of jobs) {
-      next[job.state] += 1;
+      next[displayState(job)] += 1;
     }
     return next;
   }, [jobs]);
@@ -128,19 +267,28 @@ export default function App() {
 
   const selectedJob = jobs.find((job) => job.job_id === selectedId) ?? null;
   const isMobile = useIsMobile();
+  const notOwner = isLive && ownerId !== null && ownerId !== accountId;
+  const tryLoopDone =
+    !isLive && refusedOnce && tryJobs.some((job) => job.state === 'Paid');
 
   const refreshLiveJobs = useCallback(async () => {
     setIsRefreshing(true);
     try {
       const chainJobs = await fetchTrackedJobs(loadTrackedJobIds());
-      setJobs(chainJobs);
+      setLiveJobs(chainJobs);
+      // A failure mark only survives while the chain still shows Approved.
+      setFailedIds((current) =>
+        current.filter((id) =>
+          chainJobs.some((job) => job.job_id === id && job.state === 'Approved'),
+        ),
+      );
       setSelectedId((current) =>
         current && chainJobs.some((job) => job.job_id === current)
           ? current
           : (chainJobs[0]?.job_id ?? null),
       );
     } catch {
-      setNotice('Could not refresh jobs from the contract. Check your connection and try again.');
+      setNotice('Could not refresh payments from the contract. Check your connection and try again.');
     } finally {
       setIsRefreshing(false);
     }
@@ -180,6 +328,10 @@ export default function App() {
       return;
     }
     if (accountId) {
+      if (enterOnConnect.current) {
+        enterOnConnect.current = false;
+        setEntered('live');
+      }
       if (enteredLiveFor.current === accountId) {
         return;
       }
@@ -187,7 +339,7 @@ export default function App() {
       void (async () => {
         const params = new URLSearchParams(window.location.search);
         if (params.has('transactionHashes')) {
-          setNotice('Transaction submitted — showing the latest state from the chain.');
+          setNotice('Transaction submitted. Showing the latest state from the chain.');
           window.history.replaceState({}, '', window.location.pathname);
         }
         try {
@@ -199,12 +351,17 @@ export default function App() {
       })();
     } else if (enteredLiveFor.current) {
       enteredLiveFor.current = null;
-      setJobs(createFixtureJobs());
-      setFilter('All');
-      setSelectedId(FIXTURE_JOBS[0]?.job_id ?? null);
+      setLiveJobs([]);
+      setSelectedId(null);
       setOwnerId(null);
+      setChipMenuOpen(false);
+      setEntered((current) => (current === 'live' ? 'none' : current));
     }
   }, [accountId, refreshLiveJobs]);
+
+  function toggleTheme() {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+  }
 
   function changeFilter(nextFilter: Filter) {
     setFilter(nextFilter);
@@ -218,7 +375,7 @@ export default function App() {
 
   async function handleConnect() {
     if (!selector) {
-      setNotice('Wallet is still loading — try again in a moment.');
+      setNotice('Wallet is still loading. Try again in a moment.');
       return;
     }
     try {
@@ -228,7 +385,19 @@ export default function App() {
     }
   }
 
+  /** The front door's Connect choice: straight in if a wallet is already
+   * connected, otherwise the wallet window, entering when it connects. */
+  function handleDoorConnect() {
+    if (isLive) {
+      setEntered('live');
+      return;
+    }
+    enterOnConnect.current = true;
+    void handleConnect();
+  }
+
   async function handleDisconnect() {
+    setChipMenuOpen(false);
     if (!selector) {
       return;
     }
@@ -237,6 +406,19 @@ export default function App() {
       await wallet.signOut();
     } catch {
       setNotice('Disconnecting the wallet failed. Try again.');
+    }
+  }
+
+  async function handleCopyAddress() {
+    setChipMenuOpen(false);
+    if (!accountId) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(accountId);
+      setNotice('Address copied.');
+    } catch {
+      setNotice(`Your address is ${accountId}`);
     }
   }
 
@@ -253,8 +435,7 @@ export default function App() {
         state: 'AwaitingApproval',
         source: 'local',
       };
-
-      setJobs((current) => [job, ...current]);
+      setTryJobs((current) => [job, ...current]);
       setFilter('All');
       setSelectedId(job.job_id);
       setNotice('');
@@ -266,7 +447,7 @@ export default function App() {
       return;
     }
 
-    // Track the ID before sending, so the job is listed even if the
+    // Track the ID before sending, so the payment is listed even if the
     // wallet redirects away and back.
     trackJobId(input.jobId);
     setFilter('All');
@@ -283,10 +464,10 @@ export default function App() {
           },
           GAS.create,
         );
-        setNotice(`Job "${input.jobId}" created on the contract.`);
+        setNotice(`Payment "${input.jobId}" created on the contract.`);
         await refreshLiveJobs();
       } catch (error) {
-        setNotice(`Creating the job failed: ${errorMessage(error)}`);
+        setNotice(`Creating the payment failed: ${errorMessage(error)}`);
         await refreshLiveJobs();
       }
     })();
@@ -299,15 +480,12 @@ export default function App() {
     }
 
     if (!isLive || !selector) {
-      setJobs((current) =>
+      setTryJobs((current) =>
         current.map((candidate) =>
           candidate.job_id === jobId
             ? { ...candidate, state: 'Approved' }
             : candidate,
         ),
-      );
-      setNotice(
-        `Demo job "${jobId}" approved locally. No payment was sent.`,
       );
       return;
     }
@@ -315,60 +493,66 @@ export default function App() {
     void (async () => {
       try {
         await callContractMethod(selector, 'approve_job', { job_id: jobId }, GAS.approve);
-        setNotice(`Job "${jobId}" approved on the contract.`);
+        setNotice(`Payment "${jobId}" approved on the contract.`);
         await refreshLiveJobs();
       } catch (error) {
-        setNotice(`Approving the job failed: ${errorMessage(error)}`);
+        setNotice(`Approving the payment failed: ${errorMessage(error)}`);
       }
     })();
   }
 
   function handleExecute(jobId: string) {
     if (!isLive || !selector) {
+      // Try mode: the pretend send lands after a short pending beat.
+      setTryJobs((current) =>
+        current.map((candidate) =>
+          candidate.job_id === jobId
+            ? { ...candidate, state: 'PaymentPending' }
+            : candidate,
+        ),
+      );
+      const timer = setTimeout(() => {
+        tryTimers.current.delete(jobId);
+        setTryJobs((current) =>
+          current.map((candidate) =>
+            candidate.job_id === jobId && candidate.state === 'PaymentPending'
+              ? { ...candidate, state: 'Paid' }
+              : candidate,
+          ),
+        );
+      }, 2000);
+      tryTimers.current.set(jobId, timer);
       return;
     }
+
     void (async () => {
       try {
         await callContractMethod(selector, 'execute_job', { job_id: jobId }, GAS.execute);
+        setFailedIds((current) => current.filter((id) => id !== jobId));
         setNotice(
-          `Execution sent for "${jobId}". The payment settles in a few seconds — refresh to see it paid.`,
+          `Execution sent for "${jobId}". The payment settles in a few seconds. Refresh to see it paid.`,
         );
         await refreshLiveJobs();
       } catch (error) {
+        // The contract returns the payment to Approved when a send fails;
+        // remember the failure so the page can show it as Failed.
+        setFailedIds((current) =>
+          current.includes(jobId) ? current : [...current, jobId],
+        );
         setNotice(`Executing the payment failed: ${errorMessage(error)}`);
+        await refreshLiveJobs();
       }
     })();
   }
 
-  async function handleTrack(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const id = trackInput.trim();
-    if (!id) {
-      return;
-    }
-    try {
-      const job = await fetchContractJob(id);
-      if (!job) {
-        setNotice(`No job with ID "${id}" exists on the contract.`);
-        return;
-      }
-      trackJobId(id);
-      setTrackInput('');
-      setFilter('All');
-      setSelectedId(id);
-      setNotice(`Now tracking "${id}" from the contract.`);
-      await refreshLiveJobs();
-    } catch {
-      setNotice('Could not look that job up. Check your connection and try again.');
-    }
-  }
-
-  function openCreateDialog() {
-    setIsDialogOpen(true);
-  }
-
-  function closeCreateDialog() {
-    setIsDialogOpen(false);
+  function handleStartOver() {
+    tryTimers.current.forEach((timer) => clearTimeout(timer));
+    tryTimers.current.clear();
+    setTryJobs([]);
+    setRefusedOnce(false);
+    setFilter('All');
+    setSelectedId(null);
+    setNotice('');
   }
 
   function selectJob(jobId: string) {
@@ -382,10 +566,25 @@ export default function App() {
     setIsDetailsOpen(false);
   }
 
-  const countFor = (target: Filter) =>
-    target === 'All' ? jobs.length : counts[target];
+  if (!inApp) {
+    return (
+      <>
+        <a className="skip-link" href="#main">
+          Skip to content
+        </a>
+        <FrontDoor
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onConnect={handleDoorConnect}
+          onTry={() => setEntered('try')}
+        />
+      </>
+    );
+  }
 
-  const notOwner = isLive && ownerId !== null && ownerId !== accountId;
+  const shortAccount = accountId
+    ? `${accountId.slice(0, 4)}..${accountId.slice(-4)}`
+    : '';
 
   return (
     <>
@@ -393,164 +592,162 @@ export default function App() {
         Skip to content
       </a>
 
+      <div className="app-bg" aria-hidden="true">
+        <div className="app-glow app-glow--a" />
+        <div className="app-glow app-glow--b" />
+        <svg
+          className="app-signal"
+          viewBox="0 0 1200 180"
+          preserveAspectRatio="none"
+        >
+          <path d="M-20,120 C140,60 260,150 420,100 S700,40 860,95 S1100,140 1220,80" />
+          <path
+            className="s2"
+            d="M-20,90 C160,140 300,60 470,115 S740,150 900,70 S1120,60 1220,120"
+          />
+        </svg>
+      </div>
+
       <div className="page">
         <header className="header">
-          <div className="brand">
-            <span className="brand__mark" aria-hidden="true">
-              1×
-            </span>
-            <span className="brand__name">PayOnce</span>
-          </div>
+          <Brand />
           <div className="header__actions">
-            <button
-              type="button"
-              className="theme-pill"
-              onClick={() =>
-                setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
-              }
-              aria-label={
-                theme === 'dark'
-                  ? 'Switch to light mode'
-                  : 'Switch to dark mode'
-              }
-              aria-pressed={theme === 'dark'}
-              title={
-                theme === 'dark'
-                  ? 'Switch to light mode'
-                  : 'Switch to dark mode'
-              }
-            >
-              <span className="theme-pill__knob" aria-hidden="true">
-                {theme === 'dark' ? (
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="12" cy="12" r="4" />
-                    <path d="M12 2v2" />
-                    <path d="M12 20v2" />
-                    <path d="m4.93 4.93 1.41 1.41" />
-                    <path d="m17.66 17.66 1.41 1.41" />
-                    <path d="M2 12h2" />
-                    <path d="M20 12h2" />
-                    <path d="m6.34 17.66-1.41 1.41" />
-                    <path d="m19.07 4.93-1.41 1.41" />
-                  </svg>
-                ) : (
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-                  </svg>
-                )}
-              </span>
-            </button>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
             {isLive ? (
-              <>
-                <span className="wallet-chip" title={accountId ?? undefined}>
-                  {accountId}
-                </span>
+              <div className="chip-wrap" ref={chipRef}>
                 <button
                   type="button"
-                  className="button button--ghost"
-                  onClick={handleDisconnect}
+                  className="chip"
+                  aria-haspopup="menu"
+                  aria-expanded={chipMenuOpen}
+                  title={accountId ?? undefined}
+                  onClick={() => setChipMenuOpen((open) => !open)}
                 >
-                  Disconnect
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+                    <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+                    <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+                  </svg>
+                  <span>{shortAccount}</span>
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 12 12"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M2.5 4.5 6 8l3.5-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
                 </button>
-              </>
+                {chipMenuOpen && (
+                  <div className="chip-menu" role="menu">
+                    <button
+                      type="button"
+                      className="chip-menu__row"
+                      role="menuitem"
+                      onClick={() => void handleCopyAddress()}
+                    >
+                      Copy address
+                    </button>
+                    <button
+                      type="button"
+                      className="chip-menu__row chip-menu__row--danger"
+                      role="menuitem"
+                      onClick={() => void handleDisconnect()}
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <button
                 type="button"
                 className="button button--primary button--connect"
-                onClick={handleConnect}
+                onClick={() => void handleConnect()}
               >
-                <svg
-                  width="17"
-                  height="17"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
-                  <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
-                  <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
-                </svg>
                 Connect wallet
               </button>
             )}
           </div>
         </header>
 
-        {isLive && (
-          <div className="demo-notice demo-notice--live" role="note">
-            <span className="demo-notice__tag">Live</span>
-            <p>
-              <strong>Live on NEAR testnet.</strong> You are connected as{' '}
-              <span className="mono">{accountId}</span> to the contract{' '}
-              <span className="mono">{CONTRACT_ID}</span>. Actions send real
-              testnet transactions.
-              {notOwner &&
-                ' This account is not the contract owner, so the contract will reject create, approve, and execute calls.'}
-            </p>
+        {!isLive && (
+          <div className="try-strip" role="note">
+            <span>
+              {tryLoopDone
+                ? 'That is the whole product. Connect a wallet and it is real.'
+                : 'You are trying Singla with pretend money. Nothing here touches the blockchain.'}
+            </span>
+            <button
+              type="button"
+              className="try-strip__reset"
+              onClick={handleStartOver}
+            >
+              Start over
+            </button>
           </div>
         )}
 
         <main id="main">
+          {notOwner && (
+            <p className="notice notice--warn" role="note">
+              This account is not the contract owner, so the contract will
+              reject create, approve, and execute calls.
+            </p>
+          )}
+
           {notice && (
             <p className="notice" role="status">
               {notice}
             </p>
           )}
 
-          <div className="toolbar">
-            <div className="toolbar__left">
-              <h1 className="toolbar__title">Jobs</h1>
-              <div
-                className="filters"
-                role="group"
-                aria-label="Filter jobs by status"
-              >
-                {FILTERS.map((target) => (
-                  <button
-                    key={target}
-                    type="button"
-                    className={`filter${filter === target ? ' is-active' : ''}`}
-                    aria-pressed={filter === target}
-                    onClick={() => changeFilter(target)}
-                  >
-                    {filterLabel(target)}
-                    <span className="filter__count" aria-hidden="true">
-                      {countFor(target)}
-                    </span>
-                    <span className="sr-only">
-                      {countFor(target)} {countFor(target) === 1 ? 'job' : 'jobs'}
-                    </span>
-                  </button>
-                ))}
-              </div>
+          <div className="controlline">
+            <div
+              className="filters"
+              role="group"
+              aria-label="Filter payments by status"
+            >
+              {FILTERS.map((target) => (
+                <button
+                  key={target}
+                  type="button"
+                  className={`filter${filter === target ? ' is-active' : ''}`}
+                  aria-pressed={filter === target}
+                  onClick={() => changeFilter(target)}
+                >
+                  {filterLabel(target)}
+                  <span className="filter__count" aria-hidden="true">
+                    {counts[target]}
+                  </span>
+                  <span className="sr-only">
+                    {counts[target]}{' '}
+                    {counts[target] === 1 ? 'payment' : 'payments'}
+                  </span>
+                </button>
+              ))}
             </div>
-            <div className="toolbar__actions">
+            <div className="controlline__actions">
               {isLive && (
                 <button
                   type="button"
-                  className="button button--secondary"
+                  className="button button--ghost"
                   onClick={() => void refreshLiveJobs()}
                   disabled={isRefreshing}
                 >
@@ -559,42 +756,29 @@ export default function App() {
               )}
               <button
                 type="button"
-                className="button button--primary"
-                onClick={openCreateDialog}
+                className="button button--primary button--create"
+                onClick={() => setIsDialogOpen(true)}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
                   <path d="M12 5v14M5 12h14" />
                 </svg>
-                Create job
+                New payment
               </button>
             </div>
           </div>
 
-          {isLive && (
-            <form className="track-job" onSubmit={handleTrack}>
-              <label className="track-job__label" htmlFor="track-job-id">
-                Track a job by ID
-              </label>
-              <input
-                id="track-job-id"
-                className="track-job__input"
-                type="text"
-                value={trackInput}
-                onChange={(event) => setTrackInput(event.target.value)}
-                placeholder="e.g. website-redesign-01"
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-              />
-              <button type="submit" className="button button--secondary">
-                Track job
-              </button>
-            </form>
-          )}
-
           <div className="content-grid">
             <div className="content-grid__main">
-              <div className="job-cards" role="list" aria-label="Jobs">
+              <div className="job-cards" role="list" aria-label="Payments">
                 {filteredJobs.map((job) => (
                   <JobCard
                     key={job.job_id}
@@ -613,22 +797,26 @@ export default function App() {
 
               {filteredJobs.length === 0 && (
                 <div className="empty-state">
-                  <p className="empty-state__title">No jobs in this view.</p>
-                  <p>
-                    {filter === 'All'
-                      ? isLive
-                        ? 'No tracked jobs yet. Create a job, or track an existing one by its ID above.'
-                        : 'Create a demo job to get started.'
-                      : `No jobs have the "${filterLabel(filter)}" status. Choose another filter or create a job.`}
-                  </p>
-                  {filter !== 'All' && (
-                    <button
-                      type="button"
-                      className="button button--secondary"
-                      onClick={() => changeFilter('All')}
-                    >
-                      Show all jobs
-                    </button>
+                  {filter === 'All' ? (
+                    <>
+                      <p className="empty-state__title">No payments yet.</p>
+                      <p>When you create a payment, it will appear here.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="empty-state__title">No payments here.</p>
+                      <p>
+                        Nothing has the “{filterLabel(filter)}” status right
+                        now.
+                      </p>
+                      <button
+                        type="button"
+                        className="button button--secondary"
+                        onClick={() => changeFilter('All')}
+                      >
+                        Show all payments
+                      </button>
+                    </>
                   )}
                 </div>
               )}
@@ -636,11 +824,14 @@ export default function App() {
 
             {selectedJob && (!isMobile || isDetailsOpen) && (
               <JobDetails
+                key={selectedJob.job_id}
                 job={selectedJob}
+                mode={isLive ? 'live' : 'try'}
                 onApprove={handleApprove}
                 onExecute={handleExecute}
                 onClose={closeDetails}
                 isMobile={isMobile}
+                onPayAgain={() => setRefusedOnce(true)}
               />
             )}
           </div>
@@ -649,10 +840,10 @@ export default function App() {
 
       <CreateJobDialog
         isOpen={isDialogOpen}
-        onClose={closeCreateDialog}
+        onClose={() => setIsDialogOpen(false)}
         existingIds={existingIds}
         onCreate={handleCreate}
-        live={isLive}
+        mode={isLive ? 'live' : 'try'}
       />
     </>
   );
