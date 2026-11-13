@@ -140,6 +140,10 @@ function loadFailedIds(): string[] {
 
 export default function App() {
   const [entered, setEntered] = useState<'none' | 'try' | 'live'>('none');
+  // A try session, once started, is in progress until a live session
+  // ends (sign-out) — going home to the door does not end it, so the
+  // door's Launch can walk straight back into the demo.
+  const [tryInProgress, setTryInProgress] = useState(false);
   const [tryJobs, setTryJobs] = useState<DemoJob[]>(loadTryJobs);
   const [liveJobs, setLiveJobs] = useState<DemoJob[]>([]);
   const [failedIds, setFailedIds] = useState<string[]>(loadFailedIds);
@@ -403,6 +407,9 @@ export default function App() {
       setLiveJobs([]);
       setSelectedId(null);
       setChipMenuOpen(false);
+      // A live session ending closes the visit: the door asks again,
+      // for the wallet and for any try session from before it alike.
+      setTryInProgress(false);
       setEntered((current) => (current === 'live' ? 'none' : current));
     }
   }, [accountId, refreshLiveJobs]);
@@ -433,9 +440,9 @@ export default function App() {
   }
 
   /** The header logo is the home button, in both modes: back to the front
-   * door. Nothing is reset — a connected wallet stays connected (the
-   * door's Connect choice walks straight back in), and the demo keeps
-   * its payments (Start over is the reset there). */
+   * door. Nothing is reset — a connected wallet stays connected and a
+   * try session stays in progress, so the door's Launch walks straight
+   * back into whichever desk was left (Start over is the reset there). */
   function goHome() {
     setChipMenuOpen(false);
     setIsDetailsOpen(false);
@@ -451,6 +458,13 @@ export default function App() {
     }
     enterOnConnect.current = true;
     void handleConnect();
+  }
+
+  /** The front door's Try choice (and its Launch resume): entering the
+   * demo starts a try session, which the door's Launch later resumes. */
+  function handleDoorTry() {
+    setTryInProgress(true);
+    setEntered('try');
   }
 
   async function handleDisconnect() {
@@ -642,7 +656,8 @@ export default function App() {
           theme={theme}
           onToggleTheme={toggleTheme}
           onConnect={handleDoorConnect}
-          onTry={() => setEntered('try')}
+          onTry={handleDoorTry}
+          resume={isLive ? 'live' : tryInProgress ? 'try' : null}
         />
         {toast && (
           <Toast

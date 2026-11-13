@@ -68,6 +68,40 @@ describe('App', () => {
     expect(app.getByText(/you can switch any time/i)).toBeTruthy();
   });
 
+  it('the choice offers Try it first before Connect wallet', () => {
+    const app = renderApp();
+
+    fireEvent.click(app.getByRole('button', { name: /launch app/i }));
+
+    const tryFirst = app.getByRole('button', { name: /try it first/i });
+    const connect = app.getByRole('button', { name: /connect wallet/i });
+    // DOCUMENT_POSITION_FOLLOWING: Connect wallet comes after Try it first.
+    expect(
+      tryFirst.compareDocumentPosition(connect) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('going home from the demo, Launch returns straight to the demo desk', () => {
+    const app = renderApp();
+    enterTryMode(app);
+    expect(app.getByText(/you are trying singla with pretend money/i)).toBeTruthy();
+
+    // The logo takes the demo user home to the front door.
+    fireEvent.click(
+      app.getByRole('button', { name: /back to the front door/i }),
+    );
+    expect(app.getByRole('button', { name: /launch app/i })).toBeTruthy();
+
+    // Launch resumes the try session: no choice window this time.
+    fireEvent.click(app.getByRole('button', { name: /launch app/i }));
+
+    expect(app.queryByRole('dialog', { name: /launch singla/i })).toBeNull();
+    expect(app.queryByText(/you can switch any time/i)).toBeNull();
+    expect(app.getByText(/you are trying singla with pretend money/i)).toBeTruthy();
+    expect(app.getByRole('button', { name: /new payment/i })).toBeTruthy();
+  });
+
   it('try mode starts empty, with the strip and no track form', () => {
     const app = renderApp();
     enterTryMode(app);

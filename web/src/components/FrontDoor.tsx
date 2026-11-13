@@ -7,6 +7,10 @@ interface FrontDoorProps {
   onToggleTheme: () => void;
   onConnect: () => void;
   onTry: () => void;
+  /** Where Launch goes without asking: an active wallet session resumes
+   * live, a try session in progress resumes the demo. Null (or omitted)
+   * means nobody is inside yet, so Launch opens the choice. */
+  resume?: 'live' | 'try' | null;
 }
 
 const SLIPS = [
@@ -77,17 +81,19 @@ const HOLD_MS = 7000;
 
 /**
  * The front door: one strong page, the rotating payment slip, and a single
- * door in. Launch opens the choice (connect a wallet, or try it first).
- * The slip changes by itself every 7 seconds, and it is swappable: drag
- * it with a finger or a mouse to move back or forward yourself. Each
- * card tells the whole story in its 7 seconds: written, approved, paid,
- * and a second try refused.
+ * door in. Launch opens the choice (try it first, or connect a wallet) —
+ * unless a session is already active, in which case Launch walks straight
+ * back in and the choice never opens. The slip changes by itself every
+ * 7 seconds, and it is swappable: drag it with a finger or a mouse to
+ * move back or forward yourself. Each card tells the whole story in its
+ * 7 seconds: written, approved, paid, and a second try refused.
  */
 export function FrontDoor({
   theme,
   onToggleTheme,
   onConnect,
   onTry,
+  resume = null,
 }: FrontDoorProps) {
   const [choiceOpen, setChoiceOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -297,7 +303,21 @@ export function FrontDoor({
           <button
             type="button"
             className="door-launch"
-            onClick={() => setChoiceOpen(true)}
+            onClick={() => {
+              // Already inside? Launch resumes the session directly and
+              // the choice never opens. The resume target comes from the
+              // app's live session state, so a signed-out visitor is
+              // always asked again.
+              if (resume === 'live') {
+                onConnect();
+                return;
+              }
+              if (resume === 'try') {
+                onTry();
+                return;
+              }
+              setChoiceOpen(true);
+            }}
           >
             Launch app
           </button>
@@ -426,19 +446,6 @@ export function FrontDoor({
             </button>
             <button
               type="button"
-              className="choice__row"
-              onClick={() => {
-                setChoiceOpen(false);
-                onConnect();
-              }}
-            >
-              <span className="choice__row-title">Connect wallet</span>
-              <span className="choice__row-sub">
-                The real Singla, on NEAR testnet.
-              </span>
-            </button>
-            <button
-              type="button"
               className="choice__row choice__row--try"
               onClick={() => {
                 setChoiceOpen(false);
@@ -451,6 +458,19 @@ export function FrontDoor({
               </span>
               <span className="choice__row-sub">
                 Runs in your browser with pretend money.
+              </span>
+            </button>
+            <button
+              type="button"
+              className="choice__row"
+              onClick={() => {
+                setChoiceOpen(false);
+                onConnect();
+              }}
+            >
+              <span className="choice__row-title">Connect wallet</span>
+              <span className="choice__row-sub">
+                The real Singla, on NEAR testnet.
               </span>
             </button>
             <p className="choice__foot">You can switch any time.</p>
