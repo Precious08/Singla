@@ -10,7 +10,7 @@ double-clicks, or concurrent calls.
 **Live app: https://trysingla.vercel.app** — try it first in your browser
 with pretend money, no wallet needed, or connect a NEAR testnet wallet
 (Meteor, MyNearWallet, HOT, Ledger, WalletConnect) to use the live contract
-deployed at `payonce-precious08.testnet`.
+deployed at `singla.testnet`.
 
 ## See it
 
@@ -62,9 +62,9 @@ payment can never drain the account below operating needs.
 
 ## Live deployment (NEAR testnet)
 
-- Contract: `payonce-precious08.testnet`
+- Contract: `singla.testnet`
 - Owner: `payonce-precious08.testnet`
-- Explorer: https://explorer.testnet.near.org/accounts/payonce-precious08.testnet
+- Explorer: https://explorer.testnet.near.org/accounts/singla.testnet
 
 ## The app
 

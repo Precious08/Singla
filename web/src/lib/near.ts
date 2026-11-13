@@ -4,7 +4,7 @@ import { JOB_STATES, type DemoJob, type Job, type JobState } from '../types';
 // Node globals (Buffer, process, global) for the wallet SDK's dependency
 // chain are provided by vite-plugin-node-polyfills — see vite.config.ts.
 
-export const CONTRACT_ID = 'payonce-precious08.testnet';
+export const CONTRACT_ID = 'singla.testnet';
 export const RPC_URL = 'https://rpc.testnet.near.org';
 
 const REGISTRY_KEY = 'payonce:tracked-job-ids';
