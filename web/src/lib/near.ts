@@ -15,7 +15,11 @@ export const GAS = {
   execute: '100000000000000',
 } as const;
 
-/** Job IDs this browser tracks on the live contract (the contract has no list view). */
+/**
+ * Job IDs this browser tracks on the live contract. The contract's own
+ * per-creator index is the source of truth for an account's payments; this
+ * registry only supplements it with IDs from before the index existed.
+ */
 export function loadTrackedJobIds(): string[] {
   try {
     const raw = window.localStorage.getItem(REGISTRY_KEY);
@@ -135,6 +139,19 @@ export async function fetchContractOwner(): Promise<string | null> {
   return typeof raw === 'string' ? raw : null;
 }
 
+/** Job IDs the given account created on the contract, oldest first. */
+export async function fetchJobIdsByCreator(
+  accountId: string,
+): Promise<string[]> {
+  const raw = await viewCall('get_job_ids_by_creator', {
+    account_id: accountId,
+  });
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.filter((value): value is string => typeof value === 'string');
+}
+
 export async function fetchTrackedJobs(ids: string[]): Promise<DemoJob[]> {
   const results = await Promise.all(
     ids.map(async (id) => {
@@ -219,6 +236,7 @@ export async function callContractMethod(
   methodName: string,
   args: Record<string, unknown>,
   gas: string,
+  deposit: string = '0',
 ): Promise<void> {
   const { internalActionToNaj } = await import('@near-wallet-selector/core');
   const wallet = await selector.wallet();
@@ -231,7 +249,7 @@ export async function callContractMethod(
           methodName,
           args,
           gas,
-          deposit: '0',
+          deposit,
         },
       }),
     ],

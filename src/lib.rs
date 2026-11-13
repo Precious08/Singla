@@ -1,9 +1,12 @@
 //! PayOnce job registry and payment protection.
 //!
-//! The contract owner registers jobs, approves them, and executes at most one contract-funded
-//! NEAR transfer per job. A payment reservation and the `PaymentPending` state are persisted
-//! before the transfer is scheduled. Only the private transfer callback can mark a job as paid or
-//! release its reservation after a confirmed transfer failure.
+//! Every account has its own desk: anyone can register a job, and the account that registered
+//! a job (its creator) is the only one who can approve or execute it. Executing asks the
+//! creator to attach a deposit equal to the job amount, and that deposit funds the transfer.
+//! At most one successful NEAR transfer ever happens per job. A payment reservation and the
+//! `PaymentPending` state are persisted before the transfer is scheduled. Only the private
+//! transfer callback can mark a job as paid or release its reservation after a confirmed
+//! transfer failure; on failure the deposit is refunded to the job's creator.
 //!
 //! Amounts are handled in yoctoNEAR and exposed to JSON callers as decimal `U128` strings.
 
@@ -49,6 +52,26 @@ pub struct Contract {
     /// Sum of all outstanding reservations. Used by the available-funds check.
     total_reserved: u128,
     /// Next payment attempt ID. Attempt IDs are unique and never reused.
+    next_attempt_id: u64,
+    /// The account that created each job, keyed by job ID. Jobs written before
+    /// this map existed have no entry; they belong to the contract owner.
+    creators: LookupMap<String, AccountId>,
+    /// Job IDs created by each account, in creation order. The per-account desk.
+    jobs_by_creator: LookupMap<AccountId, Vec<String>>,
+}
+
+/// The contract state exactly as the single-owner version wrote it.
+///
+/// `migrate` reads this layout once and carries it into the current layout.
+/// Nothing else should use this struct.
+#[derive(near_sdk::borsh::BorshDeserialize, near_sdk::borsh::BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
+pub struct ContractOld {
+    owner: AccountId,
+    jobs: LookupMap<String, Job>,
+    reservations: LookupMap<String, U128>,
+    attempts: LookupMap<String, u64>,
+    total_reserved: u128,
     next_attempt_id: u64,
 }
 
@@ -97,12 +120,46 @@ impl Contract {
             attempts: LookupMap::new(b"a".to_vec()),
             total_reserved: 0,
             next_attempt_id: 1,
+            creators: LookupMap::new(b"c".to_vec()),
+            jobs_by_creator: LookupMap::new(b"u".to_vec()),
         }
     }
 
-    /// Registers a new job in the `AwaitingApproval` state. Owner-only.
+    /// Carries state written by the single-owner version into the current layout.
+    ///
+    /// Only the contract account itself can run the migration. Jobs written by the
+    /// old version have no entry in the creators map; every reader treats a missing
+    /// entry as "created by the contract owner", which is exactly who created them,
+    /// so legacy jobs keep their owner and keep working under the new rules. (The old
+    /// jobs map hashes its keys, so the stored job IDs cannot be listed back for an
+    /// eager backfill of the per-creator index; the index fills in for every job
+    /// created from now on.)
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        require!(
+            env::predecessor_account_id() == env::current_account_id(),
+            "Only the contract account can migrate this contract"
+        );
+        let old: ContractOld =
+            env::state_read().expect("There is no existing contract state to migrate");
+
+        Self {
+            owner: old.owner,
+            jobs: old.jobs,
+            reservations: old.reservations,
+            attempts: old.attempts,
+            total_reserved: old.total_reserved,
+            next_attempt_id: old.next_attempt_id,
+            creators: LookupMap::new(b"c".to_vec()),
+            jobs_by_creator: LookupMap::new(b"u".to_vec()),
+        }
+    }
+
+    /// Registers a new job in the `AwaitingApproval` state.
+    ///
+    /// Any account can register a job. The calling account is recorded as the job's
+    /// creator, and only that account can approve or execute the job from here on.
     pub fn create_job(&mut self, job_id: String, recipient: AccountId, amount: U128) -> Job {
-        self.assert_owner();
         Self::validate_job_id(&job_id);
         require!(!self.jobs.contains_key(&job_id), "Job ID already exists");
         require!(amount.0 > 0, "Amount must be greater than zero");
@@ -111,27 +168,38 @@ impl Contract {
             "Recipient cannot be the contract itself"
         );
 
+        let creator = env::predecessor_account_id();
+
         let job = Job {
             job_id: job_id.clone(),
             recipient,
             amount,
             state: JobState::AwaitingApproval,
         };
-        let _ = self.jobs.insert(job_id, job.clone());
+        let _ = self.jobs.insert(job_id.clone(), job.clone());
+        let _ = self.creators.insert(job_id.clone(), creator.clone());
+
+        let mut created_ids = self
+            .jobs_by_creator
+            .get(&creator)
+            .cloned()
+            .unwrap_or_default();
+        created_ids.push(job_id);
+        let _ = self.jobs_by_creator.insert(creator, created_ids);
+
         job
     }
 
-    /// Approves a registered job. Owner-only.
+    /// Approves a registered job. Only the job's creator can approve it.
     ///
     /// Approval only changes the job's state; the recipient and amount are preserved. Approving an
     /// already approved job is idempotent and returns the existing job.
     pub fn approve_job(&mut self, job_id: String) -> Job {
-        self.assert_owner();
-
         let mut job = match self.jobs.get(&job_id) {
             Some(job) => job.clone(),
             None => env::panic_str("Job not found"),
         };
+        self.assert_creator(&job_id);
 
         if job.state == JobState::Approved {
             return job;
@@ -149,17 +217,19 @@ impl Contract {
         job
     }
 
-    /// Starts the single contract-funded payment for an approved job. Owner-only.
+    /// Starts the single payment for an approved job. Only the job's creator can
+    /// execute it, and the creator funds the payment by attaching a deposit equal
+    /// to the job amount.
     ///
     /// The reservation and the `PaymentPending` state are persisted before the transfer promise is
     /// scheduled. Once an attempt is pending, only its private callback can resolve it.
+    #[payable]
     pub fn execute_job(&mut self, job_id: String) -> Job {
-        self.assert_owner();
-
         let mut job = match self.jobs.get(&job_id) {
             Some(job) => job.clone(),
             None => env::panic_str("Job not found"),
         };
+        self.assert_creator(&job_id);
 
         match job.state {
             JobState::Approved => {}
@@ -168,6 +238,10 @@ impl Contract {
             JobState::Paid => env::panic_str("Job has already been paid"),
         }
 
+        require!(
+            env::attached_deposit().as_yoctonear() == job.amount.0,
+            "The deposit must equal the payment amount exactly"
+        );
         require!(
             env::prepaid_gas().as_gas() >= EXECUTE_JOB_MIN_GAS,
             "Not enough prepaid gas to execute job"
@@ -230,9 +304,9 @@ impl Contract {
     /// Resolves one payment attempt. Private: only the contract itself can call it.
     ///
     /// A successful transfer is final and marks the job `Paid`. A confirmed transfer failure
-    /// releases the reservation and returns the job to `Approved`, which is the only path that
-    /// permits an owner retry. Missing, malformed, stale, duplicate, or unknown results panic
-    /// without changing state.
+    /// releases the reservation, refunds the deposit to the job's creator, and returns the job
+    /// to `Approved`, which is the only path that permits a creator retry. Missing, malformed,
+    /// stale, duplicate, or unknown results panic without changing state.
     #[private]
     pub fn on_transfer_complete(&mut self, job_id: String, attempt_id: u64) {
         // Keep the privacy rule in the body as well, so it holds for every caller.
@@ -277,6 +351,12 @@ impl Contract {
             Err(near_sdk::PromiseError::Failed) => {
                 // The network confirmed the transfer failed. Only this outcome unlocks a retry.
                 job.state = JobState::Approved;
+                // The creator funded this attempt with the deposit attached to the
+                // execute call, so the amount goes back to them. (The failed transfer
+                // itself is refunded to this contract by the protocol.)
+                Promise::new(self.creator_of(&job_id))
+                    .transfer(NearToken::from_yoctonear(job.amount.0))
+                    .detach();
             }
             Err(_) => {
                 // A transfer result is never expected to carry data. Treat every other error as
@@ -300,10 +380,33 @@ impl Contract {
         self.jobs.get(&job_id).cloned()
     }
 
-    fn assert_owner(&self) {
+    /// Returns the account that created a job. Jobs written before creators were
+    /// recorded have no entry; the contract owner created those.
+    pub fn get_creator(&self, job_id: String) -> AccountId {
+        self.creator_of(&job_id)
+    }
+
+    /// Returns the IDs of the jobs the given account created, oldest first.
+    pub fn get_job_ids_by_creator(&self, account_id: AccountId) -> Vec<String> {
+        self.jobs_by_creator
+            .get(&account_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The creator of a job: its recorded creator, or the contract owner for
+    /// jobs written before creators were recorded.
+    fn creator_of(&self, job_id: &str) -> AccountId {
+        self.creators
+            .get(&job_id.to_string())
+            .cloned()
+            .unwrap_or_else(|| self.owner.clone())
+    }
+
+    fn assert_creator(&self, job_id: &str) {
         require!(
-            env::predecessor_account_id() == self.owner,
-            "Only the owner can call this method"
+            env::predecessor_account_id() == self.creator_of(job_id),
+            "Only the payment's creator can do this"
         );
     }
 
@@ -399,24 +502,56 @@ mod tests {
         contract.create_job(job_id.to_string(), recipient_id(), amount(1_000_000));
     }
 
-    /// Sets an owner context with explicit balance, storage usage, and prepaid gas.
-    fn payment_context(balance: NearToken, storage_usage: u64, gas: Gas) {
+    /// Sets a context for `predecessor` with explicit balance, storage usage,
+    /// prepaid gas, and attached deposit.
+    fn payment_context_for(
+        predecessor: AccountId,
+        balance: NearToken,
+        storage_usage: u64,
+        gas: Gas,
+        deposit: NearToken,
+    ) {
         testing_env!(
-            context(owner_id())
+            context(predecessor)
                 .account_balance(balance)
                 .account_locked_balance(NearToken::from_yoctonear(0))
                 .storage_usage(storage_usage)
                 .prepaid_gas(gas)
+                .attached_deposit(deposit)
                 .build()
         );
     }
 
-    /// Sets an owner context for a successful execution.
+    /// Sets an owner context with explicit balance, storage usage, prepaid gas,
+    /// and attached deposit.
+    fn payment_context(balance: NearToken, storage_usage: u64, gas: Gas, deposit: NearToken) {
+        payment_context_for(owner_id(), balance, storage_usage, gas, deposit);
+    }
+
+    /// Sets an owner context for a successful execution of the default job,
+    /// attaching a deposit equal to its amount.
     ///
     /// The storage usage is large enough that rewriting the persisted payment records cannot
     /// underflow the mocked blockchain's storage accounting.
     fn execution_context(balance: NearToken) {
-        payment_context(balance, 10_000, Gas::from_tgas(100));
+        payment_context(
+            balance,
+            10_000,
+            Gas::from_tgas(100),
+            NearToken::from_yoctonear(1_000_000),
+        );
+    }
+
+    /// Sets a context for the given account to execute the default job,
+    /// attaching a deposit equal to its amount.
+    fn execution_context_for(predecessor: AccountId, balance: NearToken) {
+        payment_context_for(
+            predecessor,
+            balance,
+            10_000,
+            Gas::from_tgas(100),
+            NearToken::from_yoctonear(1_000_000),
+        );
     }
 
     /// Sets a callback context from the contract account with the given promise results.
@@ -476,40 +611,25 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Only the owner")]
-    fn create_job_requires_owner() {
-        let mut contract = init_contract();
-        testing_env!(context(intruder_id()).build());
-
-        contract.create_job("job-1".to_string(), recipient_id(), amount(1));
-    }
-
-    #[test]
-    #[should_panic(expected = "Only the owner")]
-    fn approve_job_requires_owner() {
-        let mut contract = init_contract();
-        testing_env!(context(intruder_id()).build());
-
-        contract.approve_job("job-1".to_string());
-    }
-
-    #[test]
-    #[should_panic(expected = "Only the owner")]
-    fn create_job_uses_predecessor_not_signer() {
+    fn creator_is_the_predecessor_not_the_signer() {
         let mut contract = init_contract();
         // The owner signs, but the call is made by another account.
         testing_env!(context_with(owner_id(), intruder_id()).build());
 
         create_default_job(&mut contract, "job-1");
+
+        assert_eq!(contract.get_creator("job-1".to_string()), intruder_id());
     }
 
     #[test]
-    #[should_panic(expected = "Only the owner")]
-    fn approve_job_uses_predecessor_not_signer() {
+    #[should_panic(expected = "Only the payment's creator can do this")]
+    fn approve_rights_follow_the_predecessor_not_the_signer() {
         let mut contract = init_contract();
+        owner_context();
+        create_default_job(&mut contract, "job-1");
+
         // The owner signs, but the call is made by another account.
         testing_env!(context_with(owner_id(), intruder_id()).build());
-
         contract.approve_job("job-1".to_string());
     }
 
@@ -685,19 +805,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Only the owner")]
-    fn execute_job_requires_owner() {
-        let mut contract = init_contract();
-        owner_context();
-        approve_default_job(&mut contract);
-
-        testing_env!(context(intruder_id()).build());
-        execute_default_job(&mut contract);
-    }
-
-    #[test]
-    #[should_panic(expected = "Only the owner")]
-    fn execute_job_uses_predecessor_not_signer() {
+    #[should_panic(expected = "Only the payment's creator can do this")]
+    fn execute_rights_follow_the_predecessor_not_the_signer() {
         let mut contract = init_contract();
         owner_context();
         approve_default_job(&mut contract);
@@ -790,7 +899,12 @@ mod tests {
         contract.approve_job("job-1".to_string());
 
         // The balance equals the job amount, but the operating reserve still has to be covered.
-        payment_context(NearToken::from_near(1), 0, Gas::from_tgas(100));
+        payment_context(
+            NearToken::from_near(1),
+            0,
+            Gas::from_tgas(100),
+            NearToken::from_near(1),
+        );
         assert_panics(|| {
             contract.execute_job("job-1".to_string());
         });
@@ -819,11 +933,23 @@ mod tests {
         contract.approve_job("job-a".to_string());
         contract.approve_job("job-b".to_string());
 
-        // 3 NEAR covers job-a plus the reserve, but not job-b while job-a is still reserved.
-        payment_context(NearToken::from_near(3), 10_000, Gas::from_tgas(100));
+        // 2 NEAR plus job-a's own deposit covers job-a plus the reserve, but not
+        // job-b (even with its own deposit) while job-a is still reserved.
+        payment_context(
+            NearToken::from_near(2),
+            10_000,
+            Gas::from_tgas(100),
+            NearToken::from_yoctonear(one_and_a_half_near),
+        );
         contract.execute_job("job-a".to_string());
         assert_eq!(contract.total_reserved, one_and_a_half_near);
 
+        payment_context(
+            NearToken::from_near(2),
+            10_000,
+            Gas::from_tgas(100),
+            NearToken::from_yoctonear(one_near),
+        );
         assert_panics(|| {
             contract.execute_job("job-b".to_string());
         });
@@ -845,18 +971,19 @@ mod tests {
 
         let byte_cost = env::storage_byte_cost().as_yoctonear();
         let balance = NearToken::from_yoctonear(
-            NearToken::from_near(2).as_yoctonear() + PAYMENT_STORAGE_HEADROOM_BYTES * byte_cost,
+            NearToken::from_near(1).as_yoctonear() + PAYMENT_STORAGE_HEADROOM_BYTES * byte_cost,
         );
 
-        // At zero storage usage the balance exactly covers the job amount and the reserve.
-        payment_context(balance, 0, Gas::from_tgas(100));
+        // At zero storage usage the balance plus the attached deposit exactly
+        // covers the job amount and the operating reserve.
+        payment_context(balance, 0, Gas::from_tgas(100), NearToken::from_near(1));
         assert_eq!(
             Contract::available_balance(),
             NearToken::from_near(2).as_yoctonear()
         );
 
         // Storage usage above that makes the same balance insufficient.
-        payment_context(balance, 100, Gas::from_tgas(100));
+        payment_context(balance, 100, Gas::from_tgas(100), NearToken::from_near(1));
         assert_eq!(
             Contract::available_balance(),
             NearToken::from_near(2).as_yoctonear() - 100 * byte_cost
@@ -877,7 +1004,12 @@ mod tests {
         owner_context();
         approve_default_job(&mut contract);
 
-        payment_context(NearToken::from_near(5), 0, Gas::from_tgas(10));
+        payment_context(
+            NearToken::from_near(5),
+            0,
+            Gas::from_tgas(10),
+            NearToken::from_yoctonear(1_000_000),
+        );
         assert_panics(|| {
             contract.execute_job("job-1".to_string());
         });
@@ -1165,5 +1297,237 @@ mod tests {
 
         owner_context();
         contract.approve_job("job-1".to_string());
+    }
+
+    #[test]
+    fn anyone_can_create_a_job_and_is_recorded_as_its_creator() {
+        let mut contract = init_contract();
+        testing_env!(context(intruder_id()).build());
+
+        let created = contract.create_job("job-1".to_string(), recipient_id(), amount(1_000_000));
+
+        assert_eq!(created.state, JobState::AwaitingApproval);
+        assert_eq!(contract.get_creator("job-1".to_string()), intruder_id());
+        assert_eq!(
+            contract.get_job_ids_by_creator(intruder_id()),
+            vec!["job-1".to_string()]
+        );
+        assert_eq!(
+            contract.get_job_ids_by_creator(owner_id()),
+            Vec::<String>::new()
+        );
+
+        // A second job by the same account joins the same desk, in order.
+        contract.create_job("job-2".to_string(), recipient_id(), amount(2_000_000));
+        assert_eq!(
+            contract.get_job_ids_by_creator(intruder_id()),
+            vec!["job-1".to_string(), "job-2".to_string()]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Only the payment's creator can do this")]
+    fn a_non_creator_cannot_approve_a_job() {
+        let mut contract = init_contract();
+        testing_env!(context(intruder_id()).build());
+        create_default_job(&mut contract, "job-1");
+
+        // Even the contract owner cannot approve another account's job.
+        owner_context();
+        contract.approve_job("job-1".to_string());
+    }
+
+    #[test]
+    #[should_panic(expected = "Only the payment's creator can do this")]
+    fn a_non_creator_cannot_execute_a_job() {
+        let mut contract = init_contract();
+        testing_env!(context(intruder_id()).build());
+        create_default_job(&mut contract, "job-1");
+        contract.approve_job("job-1".to_string());
+
+        // The exact deposit does not help another account execute the job.
+        execution_context(NearToken::from_near(5));
+        contract.execute_job("job-1".to_string());
+    }
+
+    #[test]
+    fn creator_runs_the_full_flow_and_the_job_ends_paid() {
+        let mut contract = init_contract();
+        testing_env!(context(intruder_id()).build());
+        create_default_job(&mut contract, "job-1");
+        let approved = contract.approve_job("job-1".to_string());
+        assert_eq!(approved.state, JobState::Approved);
+
+        execution_context_for(intruder_id(), NearToken::from_near(5));
+        let pending = contract.execute_job("job-1".to_string());
+        assert_eq!(pending.state, JobState::PaymentPending);
+        let attempt = attempt_id(&contract, "job-1");
+
+        callback_context(vec![PromiseResult::Successful(vec![])]);
+        contract.on_transfer_complete("job-1".to_string(), attempt);
+
+        assert_eq!(
+            contract.get_job("job-1".to_string()).unwrap().state,
+            JobState::Paid
+        );
+        assert_eq!(contract.total_reserved, 0);
+    }
+
+    #[test]
+    fn execute_with_the_wrong_deposit_panics_and_changes_nothing() {
+        let mut contract = init_contract();
+        owner_context();
+        approve_default_job(&mut contract);
+
+        for deposit in [0u128, 999_999, 1_000_001] {
+            payment_context(
+                NearToken::from_near(5),
+                10_000,
+                Gas::from_tgas(100),
+                NearToken::from_yoctonear(deposit),
+            );
+            assert_panics(|| {
+                contract.execute_job("job-1".to_string());
+            });
+            assert_eq!(
+                contract.get_job("job-1".to_string()).unwrap().state,
+                JobState::Approved
+            );
+            assert_eq!(contract.total_reserved, 0);
+        }
+
+        // The exact deposit still works afterwards.
+        execution_context(NearToken::from_near(5));
+        let pending = execute_default_job(&mut contract);
+        assert_eq!(pending.state, JobState::PaymentPending);
+    }
+
+    #[test]
+    #[should_panic(expected = "Job has already been paid")]
+    fn a_second_execute_after_paid_panics() {
+        let mut contract = init_contract();
+        testing_env!(context(intruder_id()).build());
+        create_default_job(&mut contract, "job-1");
+        contract.approve_job("job-1".to_string());
+
+        execution_context_for(intruder_id(), NearToken::from_near(5));
+        contract.execute_job("job-1".to_string());
+        let attempt = attempt_id(&contract, "job-1");
+
+        callback_context(vec![PromiseResult::Successful(vec![])]);
+        contract.on_transfer_complete("job-1".to_string(), attempt);
+        assert_eq!(
+            contract.get_job("job-1".to_string()).unwrap().state,
+            JobState::Paid
+        );
+
+        // A second execute, even by the creator with the exact deposit, is refused.
+        execution_context_for(intruder_id(), NearToken::from_near(5));
+        contract.execute_job("job-1".to_string());
+    }
+
+    #[test]
+    fn a_legacy_job_without_a_creator_entry_belongs_to_the_owner() {
+        let mut contract = init_contract();
+        // Simulate a job written before creators were recorded: it sits in the
+        // jobs map with no creators entry.
+        let _ = contract.jobs.insert(
+            "legacy-1".to_string(),
+            Job {
+                job_id: "legacy-1".to_string(),
+                recipient: recipient_id(),
+                amount: amount(1_000_000),
+                state: JobState::AwaitingApproval,
+            },
+        );
+
+        assert_eq!(contract.get_creator("legacy-1".to_string()), owner_id());
+
+        // Another account still cannot approve it.
+        testing_env!(context(intruder_id()).build());
+        assert_panics(|| {
+            contract.approve_job("legacy-1".to_string());
+        });
+
+        // The owner can.
+        owner_context();
+        let approved = contract.approve_job("legacy-1".to_string());
+        assert_eq!(approved.state, JobState::Approved);
+    }
+
+    /// Writes the state the single-owner version would have written, holding one job.
+    fn legacy_state_with_one_job() {
+        testing_env!(context(contract_id()).build());
+        let mut old = ContractOld {
+            owner: owner_id(),
+            jobs: LookupMap::new(b"j".to_vec()),
+            reservations: LookupMap::new(b"r".to_vec()),
+            attempts: LookupMap::new(b"a".to_vec()),
+            total_reserved: 0,
+            next_attempt_id: 1,
+        };
+        let _ = old.jobs.insert(
+            "legacy-1".to_string(),
+            Job {
+                job_id: "legacy-1".to_string(),
+                recipient: recipient_id(),
+                amount: amount(1_000_000),
+                state: JobState::AwaitingApproval,
+            },
+        );
+        old.jobs.flush();
+        env::state_write(&old);
+    }
+
+    #[test]
+    fn migrate_carries_legacy_jobs_and_the_owner_can_run_one() {
+        legacy_state_with_one_job();
+
+        let mut contract = Contract::migrate();
+
+        assert_eq!(contract.get_owner(), owner_id());
+        let legacy = contract
+            .get_job("legacy-1".to_string())
+            .expect("the legacy job should survive migration");
+        assert_eq!(legacy.state, JobState::AwaitingApproval);
+        assert_eq!(legacy.recipient, recipient_id());
+        assert_eq!(legacy.amount, amount(1_000_000));
+        // No creators entry exists for it; the fallback names the owner.
+        assert_eq!(contract.get_creator("legacy-1".to_string()), owner_id());
+
+        // The owner runs the legacy job under the new rules, deposit included.
+        owner_context();
+        let approved = contract.approve_job("legacy-1".to_string());
+        assert_eq!(approved.state, JobState::Approved);
+
+        execution_context(NearToken::from_near(5));
+        let pending = contract.execute_job("legacy-1".to_string());
+        assert_eq!(pending.state, JobState::PaymentPending);
+        let attempt = attempt_id(&contract, "legacy-1");
+
+        callback_context(vec![PromiseResult::Successful(vec![])]);
+        contract.on_transfer_complete("legacy-1".to_string(), attempt);
+        assert_eq!(
+            contract.get_job("legacy-1".to_string()).unwrap().state,
+            JobState::Paid
+        );
+
+        // Jobs created after the migration are indexed under their creator.
+        testing_env!(context(intruder_id()).build());
+        contract.create_job("job-new".to_string(), recipient_id(), amount(5));
+        assert_eq!(contract.get_creator("job-new".to_string()), intruder_id());
+        assert_eq!(
+            contract.get_job_ids_by_creator(intruder_id()),
+            vec!["job-new".to_string()]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Only the contract account can migrate this contract")]
+    fn migrate_rejects_any_other_caller() {
+        legacy_state_with_one_job();
+
+        testing_env!(context(intruder_id()).build());
+        Contract::migrate();
     }
 }

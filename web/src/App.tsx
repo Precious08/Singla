@@ -13,10 +13,11 @@ import { JobCard } from './components/JobCard';
 import { JobDetails } from './components/JobDetails';
 import { JobTable } from './components/JobTable';
 import { ThemeToggle } from './components/ThemeToggle';
+import { Toast } from './components/Toast';
 import {
   callContractMethod,
   CONTRACT_ID,
-  fetchContractOwner,
+  fetchJobIdsByCreator,
   fetchTrackedJobs,
   GAS,
   initWalletSelector,
@@ -152,7 +153,9 @@ export default function App() {
 
   const [selector, setSelector] = useState<WalletSelector | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
-  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ key: number; message: string } | null>(
+    null,
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -165,6 +168,9 @@ export default function App() {
   });
   const enteredLiveFor = useRef<string | null>(null);
   const enterOnConnect = useRef(false);
+  // Set when the first wallet read at load finds an account already
+  // connected: a restored session, not a fresh sign-in.
+  const sessionRestored = useRef(false);
   const chipRef = useRef<HTMLDivElement>(null);
   const tryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -267,14 +273,37 @@ export default function App() {
 
   const selectedJob = jobs.find((job) => job.job_id === selectedId) ?? null;
   const isMobile = useIsMobile();
-  const notOwner = isLive && ownerId !== null && ownerId !== accountId;
   const tryLoopDone =
     !isLive && refusedOnce && tryJobs.some((job) => job.state === 'Paid');
+
+  const dismissToast = useCallback(() => setToast(null), []);
+
+  const showToast = useCallback((message: string) => {
+    setToast({ key: Date.now(), message });
+  }, []);
 
   const refreshLiveJobs = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const chainJobs = await fetchTrackedJobs(loadTrackedJobIds());
+      // The contract's per-creator index is the source of truth for the
+      // connected account's own payments. The browser registry only
+      // supplements it, so payments from before the index existed (or
+      // whose create call is still settling) still show.
+      let chainIds: string[] = [];
+      if (accountId) {
+        try {
+          chainIds = await fetchJobIdsByCreator(accountId);
+        } catch {
+          chainIds = [];
+        }
+      }
+      const ids = [...chainIds].reverse();
+      for (const id of loadTrackedJobIds()) {
+        if (!ids.includes(id)) {
+          ids.push(id);
+        }
+      }
+      const chainJobs = await fetchTrackedJobs(ids);
       setLiveJobs(chainJobs);
       // A failure mark only survives while the chain still shows Approved.
       setFailedIds((current) =>
@@ -292,7 +321,7 @@ export default function App() {
     } finally {
       setIsRefreshing(false);
     }
-  }, []);
+  }, [accountId]);
 
   // Set up the wallet selector once (skipped under tests).
   useEffect(() => {
@@ -307,11 +336,21 @@ export default function App() {
         return;
       }
       setSelector(instance);
+      let firstRead = true;
       const readAccount = () => {
         const accounts = instance.store.getState().accounts;
         const active =
           accounts.find((account) => account.active) ?? accounts[0];
-        setAccountId(active?.accountId ?? null);
+        const id = active?.accountId ?? null;
+        if (firstRead) {
+          firstRead = false;
+          // An account already connected on the very first read means the
+          // wallet session was restored, not freshly signed in.
+          if (id) {
+            sessionRestored.current = true;
+          }
+        }
+        setAccountId(id);
       };
       readAccount();
       subscription = instance.store.observable.subscribe(() => readAccount());
@@ -330,6 +369,15 @@ export default function App() {
     if (accountId) {
       if (enterOnConnect.current) {
         enterOnConnect.current = false;
+        sessionRestored.current = false;
+        setEntered('live');
+      } else if (sessionRestored.current) {
+        // A returning user whose wallet session was restored at load goes
+        // straight to their payments, with no front-door stop. This runs
+        // once per account (the enteredLiveFor guard below sees the visit
+        // through), so tapping the logo to go home later in the session
+        // is never overridden.
+        sessionRestored.current = false;
         setEntered('live');
       }
       if (enteredLiveFor.current === accountId) {
@@ -342,18 +390,13 @@ export default function App() {
           setNotice('Transaction submitted. Showing the latest state from the chain.');
           window.history.replaceState({}, '', window.location.pathname);
         }
-        try {
-          setOwnerId(await fetchContractOwner());
-        } catch {
-          setOwnerId(null);
-        }
         await refreshLiveJobs();
       })();
     } else if (enteredLiveFor.current) {
       enteredLiveFor.current = null;
+      sessionRestored.current = false;
       setLiveJobs([]);
       setSelectedId(null);
-      setOwnerId(null);
       setChipMenuOpen(false);
       setEntered((current) => (current === 'live' ? 'none' : current));
     }
@@ -426,9 +469,9 @@ export default function App() {
     }
     try {
       await navigator.clipboard.writeText(accountId);
-      setNotice('Address copied.');
+      showToast('Address copied.');
     } catch {
-      setNotice(`Your address is ${accountId}`);
+      showToast(`Your address is ${accountId}`);
     }
   }
 
@@ -535,9 +578,19 @@ export default function App() {
       return;
     }
 
+    // Executing funds the payment: the contract now asks for a deposit
+    // equal to the payment amount, attached to the call.
+    const job = jobs.find((candidate) => candidate.job_id === jobId);
+
     void (async () => {
       try {
-        await callContractMethod(selector, 'execute_job', { job_id: jobId }, GAS.execute);
+        await callContractMethod(
+          selector,
+          'execute_job',
+          { job_id: jobId },
+          GAS.execute,
+          job?.amount ?? '0',
+        );
         setFailedIds((current) => current.filter((id) => id !== jobId));
         setNotice(
           `Execution sent for "${jobId}". The payment settles in a few seconds. Refresh to see it paid.`,
@@ -682,6 +735,11 @@ export default function App() {
                     >
                       Copy address
                     </button>
+                    <div
+                      className="chip-menu__divider"
+                      role="separator"
+                      aria-hidden="true"
+                    />
                     <button
                       type="button"
                       className="chip-menu__row chip-menu__row--danger"
@@ -731,13 +789,6 @@ export default function App() {
         )}
 
         <main id="main">
-          {notOwner && (
-            <p className="notice notice--warn" role="note">
-              This account is not the contract owner, so the contract will
-              reject create, approve, and execute calls.
-            </p>
-          )}
-
           {notice && (
             <p className="notice" role="status">
               {notice}
@@ -776,11 +827,30 @@ export default function App() {
               {isLive && (
                 <button
                   type="button"
-                  className="button button--ghost"
+                  className="refresh-button"
                   onClick={() => void refreshLiveJobs()}
                   disabled={isRefreshing}
+                  aria-label="Refresh"
+                  title="Refresh"
                 >
-                  {isRefreshing ? 'Refreshing…' : 'Refresh'}
+                  <svg
+                    className={
+                      isRefreshing ? 'refresh-icon is-spinning' : 'refresh-icon'
+                    }
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
                 </button>
               )}
               <button
@@ -869,6 +939,14 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {toast && (
+        <Toast
+          key={toast.key}
+          message={toast.message}
+          onDismiss={dismissToast}
+        />
+      )}
 
       <CreateJobDialog
         isOpen={isDialogOpen}

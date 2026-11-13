@@ -49,17 +49,21 @@ fn assert_contract_error(result: SendResult, expected: &str) {
 }
 
 /// Sends an `execute_job` call with explicit gas for the transfer and its callback.
+///
+/// The caller funds the payment by attaching a deposit equal to the job amount.
 async fn execute_job(
     contract: &near_api::Contract,
     signer_id: AccountId,
     signer: Arc<near_api::Signer>,
     network: &near_api::NetworkConfig,
     job_id: &str,
+    deposit: u128,
 ) -> SendResult {
     contract
         .call_function("execute_job", json!({ "job_id": job_id }))
         .transaction()
         .gas(NearGas::from_tgas(100))
+        .deposit(NearToken::from_yoctonear(deposit))
         .with_signer(signer_id, signer)
         .send_to(network)
         .await
@@ -196,19 +200,36 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
         .data;
     assert_eq!(&on_chain_owner, owner.account_id());
 
-    // A non-owner cannot register a job.
-    assert_contract_error(
-        contract
-            .call_function(
-                "create_job",
-                json!({ "job_id": JOB_ID, "recipient": alice.account_id(), "amount": JOB_AMOUNT }),
-            )
-            .transaction()
-            .with_signer(alice.account_id().clone(), signer.clone())
-            .send_to(&sandbox_network)
-            .await,
-        "Only the owner can call this method",
-    );
+    // Any account can register a job, and the creator is recorded on chain.
+    contract
+        .call_function(
+            "create_job",
+            json!({ "job_id": "job-alice", "recipient": owner.account_id(), "amount": JOB_AMOUNT }),
+        )
+        .transaction()
+        .with_signer(alice.account_id().clone(), signer.clone())
+        .send_to(&sandbox_network)
+        .await?
+        .assert_success();
+
+    let alice_creator: AccountId = contract
+        .call_function("get_creator", json!({ "job_id": "job-alice" }))
+        .read_only()
+        .fetch_from(&sandbox_network)
+        .await?
+        .data;
+    assert_eq!(&alice_creator, alice.account_id());
+
+    let alice_job_ids: Vec<String> = contract
+        .call_function(
+            "get_job_ids_by_creator",
+            json!({ "account_id": alice.account_id() }),
+        )
+        .read_only()
+        .fetch_from(&sandbox_network)
+        .await?
+        .data;
+    assert_eq!(alice_job_ids, vec!["job-alice".to_string()]);
 
     // The owner registers a job.
     contract
@@ -303,7 +324,7 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
         "Recipient cannot be the contract itself",
     );
 
-    // A non-owner cannot approve the job.
+    // A non-creator cannot approve someone else's job.
     assert_contract_error(
         contract
             .call_function("approve_job", json!({ "job_id": JOB_ID }))
@@ -311,8 +332,17 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
             .with_signer(alice.account_id().clone(), signer.clone())
             .send_to(&sandbox_network)
             .await,
-        "Only the owner can call this method",
+        "Only the payment's creator can do this",
     );
+
+    // But a creator can approve their own job.
+    contract
+        .call_function("approve_job", json!({ "job_id": "job-alice" }))
+        .transaction()
+        .with_signer(alice.account_id().clone(), signer.clone())
+        .send_to(&sandbox_network)
+        .await?
+        .assert_success();
 
     // The owner approves the job.
     contract
@@ -382,12 +412,13 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
             signer.clone(),
             &sandbox_network,
             "missing",
+            JOB_AMOUNT.parse().unwrap(),
         )
         .await,
         "Job not found",
     );
 
-    // A non-owner cannot execute the job.
+    // A non-creator cannot execute someone else's job, even with the deposit.
     assert_contract_error(
         execute_job(
             &contract,
@@ -395,9 +426,10 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
             signer.clone(),
             &sandbox_network,
             JOB_ID,
+            JOB_AMOUNT.parse().unwrap(),
         )
         .await,
-        "Only the owner can call this method",
+        "Only the payment's creator can do this",
     );
 
     // The transfer callback cannot be called from outside the contract.
@@ -438,6 +470,7 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
         signer.clone(),
         &sandbox_network,
         JOB_ID,
+        JOB_AMOUNT.parse().unwrap(),
     );
     let second = execute_job(
         &contract,
@@ -445,6 +478,7 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
         second_signer,
         &sandbox_network,
         JOB_ID,
+        JOB_AMOUNT.parse().unwrap(),
     );
     let (first, second) = tokio::join!(first, second);
 
@@ -495,6 +529,7 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
             signer.clone(),
             &sandbox_network,
             JOB_ID,
+            JOB_AMOUNT.parse().unwrap(),
         )
         .await,
         "Job has already been paid",
@@ -539,6 +574,7 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
         signer.clone(),
         &sandbox_network,
         RETRY_JOB_ID,
+        RETRY_JOB_AMOUNT.parse().unwrap(),
     )
     .await?
     .into_full()
@@ -581,6 +617,7 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
         signer.clone(),
         &sandbox_network,
         RETRY_JOB_ID,
+        RETRY_JOB_AMOUNT.parse().unwrap(),
     )
     .await?
     .assert_success();
@@ -603,6 +640,7 @@ async fn test_registry_on(contract_wasm: Vec<u8>) -> testresult::TestResult<()> 
             signer.clone(),
             &sandbox_network,
             RETRY_JOB_ID,
+            RETRY_JOB_AMOUNT.parse().unwrap(),
         )
         .await,
         "Job has already been paid",
