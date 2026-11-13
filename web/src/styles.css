@@ -1509,8 +1509,6 @@ dd {
   .controlline .filters {
     overflow-x: auto;
     scrollbar-width: none;
-    mask-image: linear-gradient(to right, #000 86%, transparent 99%);
-    -webkit-mask-image: linear-gradient(to right, #000 86%, transparent 99%);
   }
 
   .controlline .filters::-webkit-scrollbar {
