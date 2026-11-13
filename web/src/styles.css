@@ -1505,16 +1505,23 @@ dd {
   flex: none;
 }
 
+/* On phones and small tablets the six tabs cannot share one line with
+   the New payment button: the button left the strip a narrow window
+   and the last tabs hid off the edge. Here the strip takes the whole
+   line and wraps, so every tab, Failed included, is fully on screen
+   with nothing to scroll sideways for. */
 @media (max-width: 860px) {
-  .controlline .filters {
-    overflow-x: auto;
-    scrollbar-width: none;
-    mask-image: linear-gradient(to right, #000 86%, transparent 99%);
-    -webkit-mask-image: linear-gradient(to right, #000 86%, transparent 99%);
+  .controlline {
+    flex-wrap: wrap;
   }
 
-  .controlline .filters::-webkit-scrollbar {
-    display: none;
+  .controlline .filters {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    row-gap: 2px;
+    mask-image: none;
+    -webkit-mask-image: none;
   }
 }
 
