@@ -122,11 +122,17 @@ html[data-theme='dark'] .theme-pill__knob {
 
 html {
   color-scheme: light;
+  /* The filter strip scrolls inside its own box, but its scrollable
+     overflow still widens the document on mobile Chrome, letting the
+     whole page pan sideways. Clip at the root; the strip keeps its own
+     scrolling. (clip, not hidden, so nothing becomes a scroll box.) */
+  overflow-x: clip;
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  overflow-x: clip;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body);
@@ -1554,6 +1560,47 @@ p {
 /* The wallet window: white in both themes (setupModal also gets
    theme: 'light'), wallets only — no sidebar, no create-a-wallet
    pitch, and no dead space where the sidebar was. */
+/* The vendor stylesheet lets an OS dark preference override its own
+   light theme: a prefers-color-scheme:dark block re-darkens the modal
+   root even when the theme is forced light (seen on a phone whose
+   browser runs dark, 2026-11-13). The doubled id below outranks that
+   block; the values mirror the vendor's own light theme. */
+#near-wallet-selector-modal#near-wallet-selector-modal {
+  --wallet-selector-content-bg: #ffffff;
+  --backdrop-bg: #26262630;
+  --heading-color: #222222;
+  --text-color: #676767;
+  --sidebar-border-color: #ededed;
+  --selected-wallet-bg: #4f7cd1;
+  --selected-wallet-bg-hover: transparent;
+  --wallet-option-border-color: #a7a7a730;
+  --wallet-option-bg-hover: #6494ee3d;
+  --wallet-option-outline-color: #6494ee;
+  --content-bg: #fafafa;
+  --change-path-bg: #ededed;
+  --home-button-bg: #ededed;
+  --confirm-button-bg: #5f8afa;
+  --confirm-button-bg-hover: #5aa6ff;
+  --error: #db5555;
+  --close-button-bg-color: #ededed;
+  --close-button-fill-icon-color: #9f9f9f;
+  --spinner-color: #676767;
+  --bottom-section: #fafafa;
+  --mobile-text: #3e3e3e;
+  --connected-green: #47e586;
+  --get-wallet-option-bg-color: #f8f9fa;
+  --get-wallet-option-bg-color-hover: #6494ee3d;
+  --get-wallet-option-border-color: #c1c1c1;
+  --get-wallet-outline-color: #6494ee;
+  --secondary-button-bg-color: #4f7cd129;
+  --secondary-button-border-color: #4f7cd129;
+  --secondary-button-text-color: #4f7cd1;
+  --deprecated-icon-bg-color: #d7e2f7;
+  --deprecated-icon-bg-color-selected: #4f7cd1;
+  --option-wallet-bg-color: #f0f0f0;
+  --option-single-wallet-bg-color: #f0f0f0;
+}
+
 .nws-modal .modal-right {
   display: none !important;
 }
